@@ -117,7 +117,7 @@ async function generateWord(audit, config = {}) {
   const sede = audit.sede || "Sin sede";
   const fecha = audit.fecha || "";
   const auditorNombre = audit.realizadaPor || "—";
-  const receptorNombre = audit.recibidaPor || "—";
+  const auditadoNombre = audit.recibidaPor || "—";
 
   const conformes = audit.items.filter(i => i.estado === "Conforme").length;
   const noConformes = audit.items.filter(i => i.estado === "No conforme").length;
@@ -225,7 +225,7 @@ async function generateWord(audit, config = {}) {
   doc.setTextColor(100, 100, 100);
   doc.text(`Fecha: ${fecha}`, pw / 2, y, { align: "center" });
   y += 4.5;
-  doc.text(`Realizada por: ${auditorNombre}     |     Recibida por: ${receptorNombre}`, pw / 2, y, { align: "center" });
+  doc.text(`Realizada por: ${auditorNombre}     |     Recibida por: ${auditadoNombre}`, pw / 2, y, { align: "center" });
   y += 10;
 
   y = h1("Introducción", y);
@@ -293,7 +293,7 @@ async function generateWord(audit, config = {}) {
   const rightX = MARGIN + colW + 15;
   const boxH = 20;
 
-  // Receptor (izquierda)
+  // Auditado (izquierda)
   doc.setDrawColor(180, 180, 180);
   doc.setLineWidth(0.3);
   doc.rect(leftX, y, colW, boxH);
@@ -304,12 +304,12 @@ async function generateWord(audit, config = {}) {
   doc.setFontSize(9);
   doc.setFont("helvetica", "bold");
   doc.setTextColor(26, 58, 92);
-  const recepLines = doc.splitTextToSize(receptorNombre.toUpperCase(), colW - 4);
-  doc.text(recepLines, leftX + colW / 2, y + boxH + 6, { align: "center" });
+  const auditadoLines = doc.splitTextToSize(auditadoNombre.toUpperCase(), colW - 4);
+  doc.text(auditadoLines, leftX + colW / 2, y + boxH + 6, { align: "center" });
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 100, 100);
-  doc.text("Receptor / Aceptante", leftX + colW / 2, y + boxH + 11, { align: "center" });
+  doc.text("Auditado / Aceptante", leftX + colW / 2, y + boxH + 11, { align: "center" });
 
   // Auditor (derecha)
   doc.setDrawColor(180, 180, 180);
@@ -555,10 +555,10 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
 function ConfigView({ config, onSave, onBack }) {
   const [sedes, setSedes] = useState([...config.sedes]);
   const [auditores, setAuditores] = useState([...(config.auditores || []).map(a => typeof a === "string" ? { nombre: a, cargo: "", firma: "" } : a)]);
-  const [receptores, setReceptores] = useState([...config.receptores]);
+  const [auditados, setAuditados] = useState([...config.auditados]);
   const [procesos, setProcesos] = useState([...(config.procesos || [])]);
   const [newSede, setNewSede] = useState("");
-  const [newReceptor, setNewReceptor] = useState("");
+  const [newAuditado, setNewAuditado] = useState("");
   const [newProceso, setNewProceso] = useState("");
   const [newAuditorNombre, setNewAuditorNombre] = useState("");
   const [newAuditorCargo, setNewAuditorCargo] = useState("");
@@ -605,13 +605,13 @@ function ConfigView({ config, onSave, onBack }) {
   };
 
   const handleSave = () => {
-    onSave({ sedes, auditores, receptores, procesos });
+    onSave({ sedes, auditores, auditados, procesos });
     onBack();
   };
 
   const simpleTabs = [
     { key: "sedes", label: "🏥 Sedes", list: sedes, setList: setSedes, newVal: newSede, setNewVal: setNewSede, placeholder: "Nombre de la sede..." },
-    { key: "receptores", label: "👥 Receptores", list: receptores, setList: setReceptores, newVal: newReceptor, setNewVal: setNewReceptor, placeholder: "Nombre del receptor..." },
+    { key: "auditados", label: "👥 Auditados", list: auditados, setList: setAuditados, newVal: newAuditado, setNewVal: setNewAuditado, placeholder: "Nombre del auditado..." },
     { key: "procesos", label: "🔧 Proceso Responsable", list: procesos, setList: setProcesos, newVal: newProceso, setNewVal: setNewProceso, placeholder: "Nombre del proceso responsable..." },
   ];
 
@@ -646,7 +646,7 @@ function ConfigView({ config, onSave, onBack }) {
           }}>{t.label} <span style={{
             marginLeft: 6, background: activeTab === t.key ? "rgba(255,255,255,0.2)" : "#eee",
             borderRadius: 10, padding: "1px 7px", fontSize: 11,
-          }}>{t.key === "auditores" ? auditores.length : t.key === "sedes" ? sedes.length : t.key === "receptores" ? receptores.length : procesos.length}</span>
+          }}>{t.key === "auditores" ? auditores.length : t.key === "sedes" ? sedes.length : t.key === "auditados" ? auditados.length : procesos.length}</span>
           </button>
         ))}
       </div>
@@ -790,7 +790,7 @@ function ConfigView({ config, onSave, onBack }) {
 }
 
 // ── Audit Form (Formulario 1) ──
-function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { sedes: [], auditores: [], receptores: [], procesos: [] } }) {
+function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { sedes: [], auditores: [], auditados: [], procesos: [] } }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
 
   const toggleRow = (idx) => {
@@ -906,7 +906,7 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
             <label style={{ fontSize: 11, opacity: 0.7, display: "block", marginBottom: 2 }}>Recibida por</label>
             {audit.bloqueado
               ? <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", backgroundColor: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 14, opacity: 0.8 }}>{audit.recibidaPor || "—"}</div>
-              : <SearchableSelect value={audit.recibidaPor} onChange={v => updateHeader("recibidaPor", v)} options={config.receptores.includes(audit.recibidaPor) ? config.receptores : audit.recibidaPor ? [audit.recibidaPor, ...config.receptores] : config.receptores} placeholder="Buscar receptor..." />
+              : <SearchableSelect value={audit.recibidaPor} onChange={v => updateHeader("recibidaPor", v)} options={config.auditados.includes(audit.recibidaPor) ? config.auditados : audit.recibidaPor ? [audit.recibidaPor, ...config.auditados] : config.auditados} placeholder="Buscar auditado..." />
             }
           </div>
         </div>
@@ -1264,7 +1264,7 @@ function NoConformidadesView({ audits, onBack }) {
 }
 
 // ── Main App ──
-const DEFAULT_CONFIG = { sedes: [], auditores: [], receptores: [], procesos: [] }; // auditores: [{nombre, cargo, firma}]
+const DEFAULT_CONFIG = { sedes: [], auditores: [], auditados: [], procesos: [] }; // auditores: [{nombre, cargo, firma}]
 
 export default function App() {
   const [audits, setAudits] = useState([]);
