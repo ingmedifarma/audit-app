@@ -111,7 +111,7 @@ const ESTADO_COLORS = {
 
 
 // ── PDF Report Generator ──
-const LOGO_DATA_URI = "data:image/jpeg;base64," + LOGO_BASE64;
+// Logo base64 is defined inside generatePDF as LOGO_B64
 
 async function generateWord(audit, config = {}) {
   const sede = audit.sede || "Sin sede";
