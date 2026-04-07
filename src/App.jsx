@@ -555,7 +555,7 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
 function ConfigView({ config, onSave, onBack }) {
   const [sedes, setSedes] = useState([...config.sedes]);
   const [auditores, setAuditores] = useState([...(config.auditores || []).map(a => typeof a === "string" ? { nombre: a, cargo: "", firma: "" } : a)]);
-  const [auditados, setAuditados] = useState([...config.auditados]);
+  const [auditados, setAuditados] = useState([...(config.auditados || [])]);
   const [procesos, setProcesos] = useState([...(config.procesos || [])]);
   const [newSede, setNewSede] = useState("");
   const [newAuditado, setNewAuditado] = useState("");
@@ -906,7 +906,7 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
             <label style={{ fontSize: 11, opacity: 0.7, display: "block", marginBottom: 2 }}>Recibida por</label>
             {audit.bloqueado
               ? <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", backgroundColor: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 14, opacity: 0.8 }}>{audit.recibidaPor || "—"}</div>
-              : <SearchableSelect value={audit.recibidaPor} onChange={v => updateHeader("recibidaPor", v)} options={config.auditados.includes(audit.recibidaPor) ? config.auditados : audit.recibidaPor ? [audit.recibidaPor, ...config.auditados] : config.auditados} placeholder="Buscar auditado..." />
+              : <SearchableSelect value={audit.recibidaPor} onChange={v => updateHeader("recibidaPor", v)} options={(config.auditados || []).includes(audit.recibidaPor) ? (config.auditados || []) : audit.recibidaPor ? [audit.recibidaPor, ...(config.auditados || [])] : (config.auditados || [])} placeholder="Buscar auditado..." />
             }
           </div>
         </div>
@@ -1279,7 +1279,15 @@ export default function App() {
       const saved = localStorage.getItem("auditorias-data");
       if (saved) setAudits(JSON.parse(saved));
       const savedConfig = localStorage.getItem("auditorias-config");
-      if (savedConfig) setConfig(JSON.parse(savedConfig));
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        // Migrar clave receptores → auditados
+        if (parsed.receptores && !parsed.auditados) {
+          parsed.auditados = parsed.receptores;
+          delete parsed.receptores;
+        }
+        setConfig({ ...DEFAULT_CONFIG, ...parsed });
+      }
     } catch (e) { /* primera vez */ }
     setLoading(false);
   }, []);
