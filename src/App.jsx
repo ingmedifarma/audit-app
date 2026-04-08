@@ -309,7 +309,7 @@ async function generateWord(audit, config = {}) {
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(100, 100, 100);
-  doc.text("Auditado / Aceptante", leftX + colW / 2, y + boxH + 11, { align: "center" });
+  doc.text("Auditado", leftX + colW / 2, y + boxH + 11, { align: "center" });
 
   // Auditor (derecha)
   doc.setDrawColor(180, 180, 180);
@@ -792,6 +792,7 @@ function ConfigView({ config, onSave, onBack }) {
 // ── Audit Form (Formulario 1) ──
 function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { sedes: [], auditores: [], auditados: [], procesos: [] } }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
+  const [validationErrors, setValidationErrors] = useState(null);
 
   const toggleRow = (idx) => {
     setExpandedRows(prev => {
@@ -814,6 +815,45 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
   const updateConclusion = (componente, value) => {
     const conclusiones = { ...(audit.conclusiones || {}), [componente]: value };
     onUpdate({ ...audit, conclusiones });
+  };
+
+  // Validation before locking
+  const validateAndLock = () => {
+    const errors = [];
+
+    // 1. Header fields
+    if (!audit.sede || !audit.sede.trim()) errors.push("Falta seleccionar la sede.");
+    if (!audit.fecha) errors.push("Falta la fecha de la auditoría.");
+    if (!audit.realizadaPor || !audit.realizadaPor.trim()) errors.push("Falta seleccionar quién realiza la auditoría.");
+    if (!audit.recibidaPor || !audit.recibidaPor.trim()) errors.push("Falta seleccionar el auditado.");
+
+    // 2. All criteria must have calificación
+    const sinCalificar = audit.items.filter(i => !i.estado);
+    if (sinCalificar.length > 0) errors.push(`Hay ${sinCalificar.length} criterio(s) sin calificar.`);
+
+    // 3. Observación → must have hallazgo
+    const obsVacias = audit.items.filter(i => i.estado === "Observación" && (!i.descripcion || !i.descripcion.trim()));
+    if (obsVacias.length > 0) errors.push(`Hay ${obsVacias.length} observación(es) sin hallazgo escrito.`);
+
+    // 4. No conforme → must have procesoResponsable AND hallazgo
+    const ncSinProceso = audit.items.filter(i => i.estado === "No conforme" && (!i.procesoResponsable || !i.procesoResponsable.trim()));
+    const ncSinHallazgo = audit.items.filter(i => i.estado === "No conforme" && (!i.descripcion || !i.descripcion.trim()));
+    if (ncSinProceso.length > 0) errors.push(`Hay ${ncSinProceso.length} no conformidad(es) sin proceso responsable.`);
+    if (ncSinHallazgo.length > 0) errors.push(`Hay ${ncSinHallazgo.length} no conformidad(es) sin hallazgo escrito.`);
+
+    // 5. All component conclusions must be filled
+    const componentes = [...new Set(audit.items.map(i => i.componente))];
+    const sinConclusion = componentes.filter(c => !(audit.conclusiones || {})[c] || !(audit.conclusiones || {})[c].trim());
+    if (sinConclusion.length > 0) errors.push(`Faltan conclusiones en ${sinConclusion.length} componente(s): ${sinConclusion.map(c => c.length > 30 ? c.substring(0, 30) + "…" : c).join(", ")}.`);
+
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    setValidationErrors(null);
+    onLock();
   };
 
   // Group items by componente
@@ -846,7 +886,7 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {!audit.bloqueado && (
-              <button onClick={onLock} style={{
+              <button onClick={validateAndLock} style={{
                 background: "rgba(40,167,69,0.85)", border: "1px solid rgba(255,255,255,0.3)",
                 color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer",
                 fontSize: 13, fontWeight: 700,
@@ -911,6 +951,29 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
           </div>
         </div>
       </div>
+
+      {/* Validation Errors */}
+      {validationErrors && validationErrors.length > 0 && (
+        <div style={{
+          background: "#fef2f2", border: "1px solid #fecaca", borderLeft: "4px solid #dc3545",
+          borderRadius: 8, padding: "14px 18px", marginBottom: 16,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b" }}>
+              No se puede guardar el informe
+            </div>
+            <button onClick={() => setValidationErrors(null)} style={{
+              background: "none", border: "none", color: "#991b1b", cursor: "pointer",
+              fontSize: 18, fontWeight: 700, padding: "0 4px",
+            }}>×</button>
+          </div>
+          {validationErrors.map((err, i) => (
+            <div key={i} style={{ fontSize: 13, color: "#b91c1c", padding: "3px 0", lineHeight: 1.4 }}>
+              • {err}
+            </div>
+          ))}
+        </div>
+      )}
 
       <SummaryStats items={audit.items} />
 
@@ -1175,12 +1238,33 @@ function NoConformidadesView({ audits, onBack }) {
           </div>
         </div>
       ) : (
-        auditosConHallazgos.map(a => {
+        (() => {
+          // Group by sede
+          const sedeGroups = {};
+          auditosConHallazgos.forEach(a => {
+            const sede = a.sede || "(Sin sede)";
+            if (!sedeGroups[sede]) sedeGroups[sede] = [];
+            sedeGroups[sede].push(a);
+          });
+          return Object.entries(sedeGroups).map(([sede, sedeAudits]) => (
+            <div key={sede} style={{ marginBottom: 24 }}>
+              <div style={{
+                fontSize: 14, fontWeight: 700, color: "#1a5276",
+                padding: "10px 16px", backgroundColor: "#eaf1fb",
+                borderRadius: "10px 10px 0 0", borderBottom: "2px solid #2980b9",
+                display: "flex", alignItems: "center", gap: 8,
+              }}>
+                <span>📍</span> {sede}
+                <span style={{ fontSize: 11, fontWeight: 400, color: "#666", marginLeft: "auto" }}>
+                  {sedeAudits.reduce((s, a) => s + a.findings.length, 0)} hallazgo(s)
+                </span>
+              </div>
+              {sedeAudits.map(a => {
           const isOpen = !!expandedAudits[a.id];
           const nc = a.findings.filter(f => f.estado === "No conforme").length;
           const obs = a.findings.filter(f => f.estado === "Observación").length;
           return (
-            <div key={a.id} style={{ marginBottom: 12, borderRadius: 10, overflow: "hidden", border: "1px solid #e0e0e0" }}>
+            <div key={a.id} style={{ overflow: "hidden", border: "1px solid #e0e0e0", borderTop: "none" }}>
               {/* Audit header row - always visible */}
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -1189,8 +1273,8 @@ function NoConformidadesView({ audits, onBack }) {
               }} onClick={() => toggleAudit(a.id)}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
                   <div>
-                    <div style={{ fontSize: 14, fontWeight: 700 }}>{a.sede || "(Sin sede)"}</div>
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{a.fecha}</div>
+                    <div style={{ fontSize: 14, fontWeight: 700 }}>{a.tipo === "gestion" ? "Gestión" : "Control Interno"}</div>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>{a.fecha} · {a.realizadaPor || "—"}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6, marginLeft: 8 }}>
                     {nc > 0 && <span style={{ fontSize: 11, fontWeight: 700, backgroundColor: "#dc3545", color: "#fff", padding: "2px 8px", borderRadius: 6 }}>{nc} NC</span>}
@@ -1257,7 +1341,10 @@ function NoConformidadesView({ audits, onBack }) {
               )}
             </div>
           );
-        })
+        })}
+            </div>
+          ));
+        })()
       )}
     </div>
   );
@@ -1413,11 +1500,8 @@ export default function App() {
                 GESTIÓN DE CALIDAD Y CONTROL INTERNO
               </div>
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
-                Sistema de Auditorías Internas y Externas
+                Programa de Auditorías Internas y Externas
               </h1>
-              <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
-                FT-GCCI-01 v2
-              </div>
             </div>
           </div>
 
@@ -1473,82 +1557,108 @@ export default function App() {
               <h3 style={{ fontSize: 15, fontWeight: 700, color: "#1a3a5c", marginBottom: 12 }}>
                 Auditorías Registradas ({audits.length})
               </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {[...audits].reverse().map(a => {
-                  const nc = a.items.filter(i => i.estado === "No conforme").length;
-                  const obs = a.items.filter(i => i.estado === "Observación").length;
-                  const conf = a.items.filter(i => i.estado === "Conforme").length;
-                  const evaluated = a.items.filter(i => i.estado).length;
-                  const total = a.items.length;
-                  return (
-                    <div key={a.id} style={{
-                      display: "flex", alignItems: "center", gap: 14,
-                      background: "#fff", border: "1px solid #e8edf2",
-                      borderRadius: 10, padding: "14px 16px",
-                      cursor: "pointer", transition: "all 0.15s",
-                    }}
-                      onClick={() => openAudit(a.id)}
-                      onMouseOver={e => e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)"}
-                      onMouseOut={e => e.currentTarget.style.boxShadow = "none"}
-                    >
-                      <div style={{
-                        width: 40, height: 40, borderRadius: 10,
-                        background: a.tipo === "gestion"
-                          ? "linear-gradient(135deg, #1a5276, #2980b9)"
-                          : "linear-gradient(135deg, #6c3483, #8e44ad)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        color: "#fff", fontSize: 18, flexShrink: 0,
-                      }}>
-                        {a.tipo === "gestion" ? "G" : "CI"}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#1a3a5c" }}>
-                          {a.sede || "(Sin sede asignada)"}
-                        </div>
-                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
-                          {a.fecha} · {a.realizadaPor || "—"} · {evaluated}/{total} evaluados
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                        {nc > 0 && <span style={{
-                          fontSize: 11, fontWeight: 700, color: "#dc3545",
-                          backgroundColor: "#fef2f2", padding: "3px 8px", borderRadius: 6,
-                        }}>{nc} NC</span>}
-                        {obs > 0 && <span style={{
-                          fontSize: 11, fontWeight: 700, color: "#856404",
-                          backgroundColor: "#fffbeb", padding: "3px 8px", borderRadius: 6,
-                        }}>{obs} OBS</span>}
-                        {conf > 0 && <span style={{
-                          fontSize: 11, fontWeight: 700, color: "#155724",
-                          backgroundColor: "#d4edda", padding: "3px 8px", borderRadius: 6,
-                        }}>{conf} ✓</span>}
-                      </div>
-                      {a.bloqueado && (
-                        <>
-                          <button onClick={e => { e.stopPropagation(); generateWord(a, config); }}
-                            style={{
-                              background: "#1a5276", border: "none", borderRadius: 6,
-                              color: "#fff", fontSize: 11, fontWeight: 700,
-                              padding: "4px 10px", cursor: "pointer",
-                            }}
-                            title="Descargar informe Word"
-                          >📄 PDF</button>
-                          <span title="Informe guardado" style={{ fontSize: 16, color: "#28a745", padding: "4px 6px" }}>🔒</span>
-                        </>
-                      )}
-                      <button onClick={e => { e.stopPropagation(); deleteAudit(a.id); }}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: "#ccc", fontSize: 18, padding: "4px 8px", borderRadius: 6,
-                        }}
-                        onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
-                        onMouseOut={e => e.currentTarget.style.color = "#ccc"}
-                        title="Eliminar auditoría"
-                      >×</button>
+              {(() => {
+                const sorted = [...audits].reverse();
+                const sedeGroups = {};
+                sorted.forEach(a => {
+                  const sede = a.sede || "(Sin sede asignada)";
+                  if (!sedeGroups[sede]) sedeGroups[sede] = [];
+                  sedeGroups[sede].push(a);
+                });
+                return Object.entries(sedeGroups).map(([sede, sedeAudits]) => (
+                  <div key={sede} style={{ marginBottom: 20 }}>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, color: "#1a5276",
+                      padding: "8px 14px", backgroundColor: "#eaf1fb",
+                      borderRadius: "8px 8px 0 0", borderBottom: "2px solid #2980b9",
+                      display: "flex", alignItems: "center", gap: 8,
+                    }}>
+                      <span>📍</span> {sede}
+                      <span style={{ fontSize: 11, fontWeight: 400, color: "#666", marginLeft: "auto" }}>
+                        {sedeAudits.length} auditoría(s)
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                      {sedeAudits.map((a, ai) => {
+                        const nc = a.items.filter(i => i.estado === "No conforme").length;
+                        const obs = a.items.filter(i => i.estado === "Observación").length;
+                        const conf = a.items.filter(i => i.estado === "Conforme").length;
+                        const evaluated = a.items.filter(i => i.estado).length;
+                        const total = a.items.length;
+                        return (
+                          <div key={a.id} style={{
+                            display: "flex", alignItems: "center", gap: 14,
+                            background: "#fff", border: "1px solid #e8edf2",
+                            borderTop: ai === 0 ? "none" : "1px solid #e8edf2",
+                            borderRadius: ai === sedeAudits.length - 1 ? "0 0 8px 8px" : 0,
+                            padding: "14px 16px",
+                            cursor: "pointer", transition: "all 0.15s",
+                          }}
+                            onClick={() => openAudit(a.id)}
+                            onMouseOver={e => e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.08)"}
+                            onMouseOut={e => e.currentTarget.style.boxShadow = "none"}
+                          >
+                            <div style={{
+                              width: 40, height: 40, borderRadius: 10,
+                              background: a.tipo === "gestion"
+                                ? "linear-gradient(135deg, #1a5276, #2980b9)"
+                                : "linear-gradient(135deg, #6c3483, #8e44ad)",
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              color: "#fff", fontSize: 18, flexShrink: 0,
+                            }}>
+                              {a.tipo === "gestion" ? "G" : "CI"}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: "#1a3a5c" }}>
+                                {a.tipo === "gestion" ? "Gestión" : "Control Interno"}
+                              </div>
+                              <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+                                {a.fecha} · {a.realizadaPor || "—"} · {evaluated}/{total} evaluados
+                              </div>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              {nc > 0 && <span style={{
+                                fontSize: 11, fontWeight: 700, color: "#dc3545",
+                                backgroundColor: "#fef2f2", padding: "3px 8px", borderRadius: 6,
+                              }}>{nc} NC</span>}
+                              {obs > 0 && <span style={{
+                                fontSize: 11, fontWeight: 700, color: "#856404",
+                                backgroundColor: "#fffbeb", padding: "3px 8px", borderRadius: 6,
+                              }}>{obs} OBS</span>}
+                              {conf > 0 && <span style={{
+                                fontSize: 11, fontWeight: 700, color: "#155724",
+                                backgroundColor: "#d4edda", padding: "3px 8px", borderRadius: 6,
+                              }}>{conf} ✓</span>}
+                            </div>
+                            {a.bloqueado && (
+                              <>
+                                <button onClick={e => { e.stopPropagation(); generateWord(a, config); }}
+                                  style={{
+                                    background: "#1a5276", border: "none", borderRadius: 6,
+                                    color: "#fff", fontSize: 11, fontWeight: 700,
+                                    padding: "4px 10px", cursor: "pointer",
+                                  }}
+                                  title="Descargar informe PDF"
+                                >📄 PDF</button>
+                                <span title="Informe guardado" style={{ fontSize: 16, color: "#28a745", padding: "4px 6px" }}>🔒</span>
+                              </>
+                            )}
+                            <button onClick={e => { e.stopPropagation(); deleteAudit(a.id); }}
+                              style={{
+                                background: "none", border: "none", cursor: "pointer",
+                                color: "#ccc", fontSize: 18, padding: "4px 8px", borderRadius: 6,
+                              }}
+                              onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
+                              onMouseOut={e => e.currentTarget.style.color = "#ccc"}
+                              title="Eliminar auditoría"
+                            >×</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ));
+              })()}
             </div>
           )}
 
