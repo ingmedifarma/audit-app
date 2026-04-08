@@ -1147,6 +1147,7 @@ function NoConformidadesView({ audits, onBack }) {
   const [filtroSede, setFiltroSede] = useState("todas");
   const [filtroEstado, setFiltroEstado] = useState("No conforme");
   const [expandedAudits, setExpandedAudits] = useState({});
+  const [expandedSedesNC, setExpandedSedesNC] = useState({});
 
   const toggleAudit = (auditId) => {
     setExpandedAudits(prev => ({ ...prev, [auditId]: !prev[auditId] }));
@@ -1251,14 +1252,22 @@ function NoConformidadesView({ audits, onBack }) {
               <div style={{
                 fontSize: 14, fontWeight: 700, color: "#1a5276",
                 padding: "10px 16px", backgroundColor: "#eaf1fb",
-                borderRadius: "10px 10px 0 0", borderBottom: "2px solid #2980b9",
+                borderRadius: expandedSedesNC[sede] === false ? 10 : "10px 10px 0 0",
+                borderBottom: expandedSedesNC[sede] === false ? "none" : "2px solid #2980b9",
                 display: "flex", alignItems: "center", gap: 8,
-              }}>
+                cursor: "pointer", userSelect: "none",
+              }} onClick={() => setExpandedSedesNC(prev => ({ ...prev, [sede]: prev[sede] === false ? true : prev[sede] === undefined ? false : !prev[sede] }))}>
+                <span style={{
+                  fontSize: 12, transition: "transform 0.2s", display: "inline-block",
+                  transform: expandedSedesNC[sede] === false ? "rotate(-90deg)" : "rotate(0deg)",
+                }}>▼</span>
                 <span>📍</span> {sede}
                 <span style={{ fontSize: 11, fontWeight: 400, color: "#666", marginLeft: "auto" }}>
                   {sedeAudits.reduce((s, a) => s + a.findings.length, 0)} hallazgo(s)
                 </span>
               </div>
+              {expandedSedesNC[sede] !== false && (
+              <div>
               {sedeAudits.map(a => {
           const isOpen = !!expandedAudits[a.id];
           const nc = a.findings.filter(f => f.estado === "No conforme").length;
@@ -1342,6 +1351,8 @@ function NoConformidadesView({ audits, onBack }) {
             </div>
           );
         })}
+              </div>
+              )}
             </div>
           ));
         })()
@@ -1359,6 +1370,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState("home"); // home, form, nc, config
   const [activeAuditId, setActiveAuditId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [expandedSedes, setExpandedSedes] = useState({});
 
   // Carga desde localStorage
   useEffect(() => {
@@ -1566,18 +1578,25 @@ export default function App() {
                   sedeGroups[sede].push(a);
                 });
                 return Object.entries(sedeGroups).map(([sede, sedeAudits]) => (
-                  <div key={sede} style={{ marginBottom: 20 }}>
+                  <div key={sede} style={{ marginBottom: 16 }}>
                     <div style={{
                       fontSize: 13, fontWeight: 700, color: "#1a5276",
-                      padding: "8px 14px", backgroundColor: "#eaf1fb",
-                      borderRadius: "8px 8px 0 0", borderBottom: "2px solid #2980b9",
+                      padding: "10px 14px", backgroundColor: "#eaf1fb",
+                      borderRadius: expandedSedes[sede] === false ? 8 : "8px 8px 0 0",
+                      borderBottom: expandedSedes[sede] === false ? "none" : "2px solid #2980b9",
                       display: "flex", alignItems: "center", gap: 8,
-                    }}>
+                      cursor: "pointer", userSelect: "none",
+                    }} onClick={() => setExpandedSedes(prev => ({ ...prev, [sede]: prev[sede] === false ? true : prev[sede] === undefined ? false : !prev[sede] }))}>
+                      <span style={{
+                        fontSize: 12, transition: "transform 0.2s", display: "inline-block",
+                        transform: expandedSedes[sede] === false ? "rotate(-90deg)" : "rotate(0deg)",
+                      }}>▼</span>
                       <span>📍</span> {sede}
                       <span style={{ fontSize: 11, fontWeight: 400, color: "#666", marginLeft: "auto" }}>
                         {sedeAudits.length} auditoría(s)
                       </span>
                     </div>
+                    {expandedSedes[sede] !== false && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
                       {sedeAudits.map((a, ai) => {
                         const nc = a.items.filter(i => i.estado === "No conforme").length;
@@ -1656,6 +1675,7 @@ export default function App() {
                         );
                       })}
                     </div>
+                    )}
                   </div>
                 ));
               })()}
