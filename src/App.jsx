@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import { supabase } from "./supabaseClient";
 
 const GESTION_CRITERIA = [
   { componente: "DOCUMENTACIÓN LEGAL", criterio: "Cuenta con Certificado de Existencia y Representación Legal no menor a 6 meses", aclaracion: "NO APLICA" },
@@ -552,17 +553,38 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
 }
 
 // ── ConfigView ──
-function ConfigView({ config, onSave, onBack }) {
+function ConfigView({ config, audits = [], onSave, onBack }) {
   const [sedes, setSedes] = useState([...config.sedes]);
   const [auditores, setAuditores] = useState([...(config.auditores || []).map(a => typeof a === "string" ? { nombre: a, cargo: "", firma: "" } : a)]);
   const [auditados, setAuditados] = useState([...(config.auditados || [])]);
   const [procesos, setProcesos] = useState([...(config.procesos || [])]);
+  const [inactivos, setInactivos] = useState({
+    sedes: [...(config.inactivos?.sedes || [])],
+    auditores: [...(config.inactivos?.auditores || [])],
+    auditados: [...(config.inactivos?.auditados || [])],
+    procesos: [...(config.inactivos?.procesos || [])],
+  });
   const [newSede, setNewSede] = useState("");
   const [newAuditado, setNewAuditado] = useState("");
   const [newProceso, setNewProceso] = useState("");
   const [newAuditorNombre, setNewAuditorNombre] = useState("");
   const [newAuditorCargo, setNewAuditorCargo] = useState("");
   const [activeTab, setActiveTab] = useState("sedes");
+  const [editingItem, setEditingItem] = useState(null);
+  const [adminPwModal, setAdminPwModal] = useState(null);
+  const [adminPw, setAdminPw] = useState("");
+  const [adminPwError, setAdminPwError] = useState(false);
+  const [showInactivos, setShowInactivos] = useState(false);
+
+  const getUsageCount = (type, value) => {
+    return audits.filter(a => {
+      if (type === "sedes") return a.sede === value;
+      if (type === "auditados") return a.recibidaPor === value;
+      if (type === "procesos") return a.items.some(i => i.procesoResponsable === value);
+      if (type === "auditores") return a.realizadaPor === value;
+      return false;
+    }).length;
+  };
 
   const addItem = (list, setList, value, setValue) => {
     const trimmed = value.trim();
@@ -573,6 +595,36 @@ function ConfigView({ config, onSave, onBack }) {
 
   const removeItem = (list, setList, item) => {
     setList(list.filter(i => i !== item));
+  };
+
+  // Inactivar: mover de activos a inactivos
+  const inactivateSimpleItem = (type, item) => {
+    if (type === "sedes") setSedes(sedes.filter(s => s !== item));
+    else if (type === "auditados") setAuditados(auditados.filter(r => r !== item));
+    else if (type === "procesos") setProcesos(procesos.filter(p => p !== item));
+    setInactivos(prev => ({ ...prev, [type]: [...prev[type], item] }));
+  };
+
+  const inactivateAuditor = (nombre) => {
+    const auditor = auditores.find(a => a.nombre === nombre);
+    if (!auditor) return;
+    setAuditores(auditores.filter(a => a.nombre !== nombre));
+    setInactivos(prev => ({ ...prev, auditores: [...prev.auditores, auditor] }));
+  };
+
+  // Reactivar: mover de inactivos a activos
+  const reactivateSimpleItem = (type, item) => {
+    setInactivos(prev => ({ ...prev, [type]: prev[type].filter(i => i !== item) }));
+    if (type === "sedes") setSedes(prev => [...prev, item]);
+    else if (type === "auditados") setAuditados(prev => [...prev, item]);
+    else if (type === "procesos") setProcesos(prev => [...prev, item]);
+  };
+
+  const reactivateAuditor = (nombre) => {
+    const auditor = inactivos.auditores.find(a => a.nombre === nombre);
+    if (!auditor) return;
+    setInactivos(prev => ({ ...prev, auditores: prev.auditores.filter(a => a.nombre !== nombre) }));
+    setAuditores(prev => [...prev, auditor]);
   };
 
   const addAuditor = () => {
@@ -604,8 +656,49 @@ function ConfigView({ config, onSave, onBack }) {
     reader.readAsDataURL(file);
   };
 
+  // Start editing an in-use item (requires password)
+  const requestEdit = (type, oldValue) => {
+    setAdminPwModal({ action: "edit", type, oldValue });
+    setAdminPw("");
+    setAdminPwError(false);
+  };
+
+  const confirmAdminPw = () => {
+    if (adminPw !== "CoordinadorQCI*") {
+      setAdminPwError(true);
+      return;
+    }
+    if (adminPwModal.action === "edit") {
+      setEditingItem({ type: adminPwModal.type, oldValue: adminPwModal.oldValue, newValue: adminPwModal.oldValue });
+    } else if (adminPwModal.action === "delete") {
+      const { type, value } = adminPwModal;
+      if (type === "auditores") removeAuditor(value);
+      else {
+        const tab = simpleTabs.find(t => t.key === type);
+        if (tab) removeItem(tab.list, tab.setList, value);
+      }
+    }
+    setAdminPwModal(null);
+    setAdminPw("");
+  };
+
+  const saveEditedItem = () => {
+    if (!editingItem || !editingItem.newValue.trim()) return;
+    const { type, oldValue, newValue } = editingItem;
+    if (type === "auditores") {
+      setAuditores(auditores.map(a => a.nombre === oldValue ? { ...a, nombre: newValue.trim() } : a));
+    } else if (type === "sedes") {
+      setSedes(sedes.map(s => s === oldValue ? newValue.trim() : s));
+    } else if (type === "auditados") {
+      setAuditados(auditados.map(r => r === oldValue ? newValue.trim() : r));
+    } else if (type === "procesos") {
+      setProcesos(procesos.map(p => p === oldValue ? newValue.trim() : p));
+    }
+    setEditingItem(null);
+  };
+
   const handleSave = () => {
-    onSave({ sedes, auditores, auditados, procesos });
+    onSave({ sedes, auditores, auditados, procesos, inactivos });
     onBack();
   };
 
@@ -616,6 +709,14 @@ function ConfigView({ config, onSave, onBack }) {
   ];
 
   const current = simpleTabs.find(t => t.key === activeTab);
+
+  // Reusable "in-use" badge
+  const InUseBadge = ({ count }) => (
+    <span title={`En uso en ${count} auditoría(s)`} style={{
+      fontSize: 10, fontWeight: 600, color: "#1a5276", backgroundColor: "#dbeafe",
+      padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap",
+    }}>🔗 {count} registro(s)</span>
+  );
 
   return (
     <div>
@@ -633,6 +734,74 @@ function ConfigView({ config, onSave, onBack }) {
           color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13,
         }}>← Volver</button>
       </div>
+
+      {/* Admin password modal */}
+      {adminPwModal && (
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: "rgba(0,0,0,0.5)", display: "flex",
+          alignItems: "center", justifyContent: "center", zIndex: 9999,
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 12, padding: 32, width: 360,
+            boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          }}>
+            <h3 style={{ margin: "0 0 8px 0", fontSize: 16, color: "#1a3a5c" }}>🔒 Contraseña de administrador</h3>
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 16px 0" }}>
+              Este elemento está en uso en registros de auditoría. Ingrese la contraseña para {adminPwModal.action === "edit" ? "editarlo" : "eliminarlo"}.
+            </p>
+            <input
+              type="password"
+              value={adminPw}
+              onChange={e => { setAdminPw(e.target.value); setAdminPwError(false); }}
+              onKeyDown={e => e.key === "Enter" && confirmAdminPw()}
+              placeholder="Contraseña..."
+              autoFocus
+              style={{
+                width: "100%", padding: "10px 14px", borderRadius: 8,
+                border: `1px solid ${adminPwError ? "#dc3545" : "#ddd"}`,
+                fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 6,
+              }}
+            />
+            {adminPwError && <div style={{ fontSize: 12, color: "#dc3545", marginBottom: 8 }}>Contraseña incorrecta</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button onClick={() => setAdminPwModal(null)} style={{
+                padding: "8px 20px", borderRadius: 8, border: "1px solid #ddd",
+                background: "#fff", color: "#666", fontSize: 13, cursor: "pointer",
+              }}>Cancelar</button>
+              <button onClick={confirmAdminPw} style={{
+                padding: "8px 20px", borderRadius: 8, border: "none",
+                background: "#1a5276", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              }}>Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Inline edit modal */}
+      {editingItem && (
+        <div style={{
+          background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10,
+          padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a5276", whiteSpace: "nowrap" }}>Editando:</span>
+          <input
+            value={editingItem.newValue}
+            onChange={e => setEditingItem({ ...editingItem, newValue: e.target.value })}
+            onKeyDown={e => e.key === "Enter" && saveEditedItem()}
+            autoFocus
+            style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 14, outline: "none" }}
+          />
+          <button onClick={saveEditedItem} style={{
+            padding: "8px 16px", borderRadius: 6, background: "#28a745", color: "#fff",
+            border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer",
+          }}>✓ Guardar</button>
+          <button onClick={() => setEditingItem(null)} style={{
+            padding: "8px 16px", borderRadius: 6, background: "#fff", color: "#666",
+            border: "1px solid #ddd", fontSize: 13, cursor: "pointer",
+          }}>Cancelar</button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
@@ -677,16 +846,20 @@ function ConfigView({ config, onSave, onBack }) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {auditores.map(a => (
+              {auditores.map(a => {
+                const usage = getUsageCount("auditores", a.nombre);
+                const inUse = usage > 0;
+                return (
                 <div key={a.nombre} style={{
-                  borderRadius: 10, border: "1px solid #e0e8f0", background: "#f8fbff", padding: 16,
+                  borderRadius: 10, border: `1px solid ${inUse ? "#b8d4f0" : "#e0e8f0"}`, background: inUse ? "#f0f7ff" : "#f8fbff", padding: 16,
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                     <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <div>
                         <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>NOMBRE</label>
-                        <input value={a.nombre} onChange={e => updateAuditorField(a.nombre, "nombre", e.target.value)}
-                          style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                        <input value={a.nombre} onChange={e => !inUse && updateAuditorField(a.nombre, "nombre", e.target.value)}
+                          readOnly={inUse}
+                          style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box", backgroundColor: inUse ? "#eef4fb" : "#fff" }} />
                       </div>
                       <div>
                         <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>CARGO</label>
@@ -695,13 +868,29 @@ function ConfigView({ config, onSave, onBack }) {
                           style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
                       </div>
                     </div>
-                    <button onClick={() => removeAuditor(a.nombre)} style={{
-                      background: "none", border: "none", cursor: "pointer",
-                      color: "#ccc", fontSize: 20, padding: "2px 8px", marginLeft: 10,
-                    }}
-                      onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
-                      onMouseOut={e => e.currentTarget.style.color = "#ccc"}
-                    >×</button>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 10 }}>
+                      {inUse && <InUseBadge count={usage} />}
+                      {inUse && (
+                        <button onClick={() => requestEdit("auditores", a.nombre)} title="Editar nombre (requiere contraseña)" style={{
+                          background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer",
+                          color: "#2980b9", fontSize: 13, padding: "2px 8px",
+                        }}>✏️</button>
+                      )}
+                      {!inUse ? (
+                        <button onClick={() => removeAuditor(a.nombre)} style={{
+                          background: "none", border: "none", cursor: "pointer",
+                          color: "#ccc", fontSize: 20, padding: "2px 8px",
+                        }}
+                          onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
+                          onMouseOut={e => e.currentTarget.style.color = "#ccc"}
+                        >×</button>
+                      ) : (
+                        <button onClick={() => inactivateAuditor(a.nombre)} title="Inactivar (ocultar de desplegables)" style={{
+                          background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer",
+                          color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px",
+                        }}>🚫</button>
+                      )}
+                    </div>
                   </div>
                   {/* Firma */}
                   <div>
@@ -730,7 +919,8 @@ function ConfigView({ config, onSave, onBack }) {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -759,25 +949,104 @@ function ConfigView({ config, onSave, onBack }) {
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {current.list.map(item => (
+              {current.list.map(item => {
+                const usage = getUsageCount(current.key, item);
+                const inUse = usage > 0;
+                return (
                 <div key={item} style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "12px 16px", borderRadius: 8, background: "#f8f9fa", border: "1px solid #e9ecef",
+                  padding: "12px 16px", borderRadius: 8,
+                  background: inUse ? "#f0f7ff" : "#f8f9fa",
+                  border: `1px solid ${inUse ? "#b8d4f0" : "#e9ecef"}`,
                 }}>
                   <span style={{ fontSize: 14, color: "#333" }}>{item}</span>
-                  <button onClick={() => removeItem(current.list, current.setList, item)} style={{
-                    background: "none", border: "none", cursor: "pointer",
-                    color: "#ccc", fontSize: 18, padding: "2px 6px", borderRadius: 4,
-                  }}
-                    onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
-                    onMouseOut={e => e.currentTarget.style.color = "#ccc"}
-                  >×</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {inUse && <InUseBadge count={usage} />}
+                    {inUse && (
+                      <button onClick={() => requestEdit(current.key, item)} title="Editar (requiere contraseña)" style={{
+                        background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer",
+                        color: "#2980b9", fontSize: 13, padding: "2px 8px",
+                      }}>✏️</button>
+                    )}
+                    {!inUse ? (
+                      <button onClick={() => removeItem(current.list, current.setList, item)} style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        color: "#ccc", fontSize: 18, padding: "2px 6px", borderRadius: 4,
+                      }}
+                        onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
+                        onMouseOut={e => e.currentTarget.style.color = "#ccc"}
+                      >×</button>
+                    ) : (
+                      <button onClick={() => inactivateSimpleItem(current.key, item)} title="Inactivar (ocultar de desplegables)" style={{
+                        background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer",
+                        color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px",
+                      }}>🚫</button>
+                    )}
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
+
+      {/* Inactive items section */}
+      {(() => {
+        const inactiveKey = activeTab;
+        const inactiveList = inactivos[inactiveKey] || [];
+        if (inactiveList.length === 0) return null;
+        return (
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => setShowInactivos(!showInactivos)} style={{
+              background: showInactivos ? "#6c757d" : "#f0f0f0", border: "none", borderRadius: 8,
+              padding: "8px 16px", fontSize: 12, fontWeight: 600, cursor: "pointer",
+              color: showInactivos ? "#fff" : "#666", width: "100%", textAlign: "left",
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              <span style={{
+                fontSize: 11, transition: "transform 0.2s", display: "inline-block",
+                transform: showInactivos ? "rotate(0deg)" : "rotate(-90deg)",
+              }}>▼</span>
+              🚫 Inactivos ({inactiveList.length})
+            </button>
+            {showInactivos && (
+              <div style={{
+                background: "#fafafa", border: "1px solid #e0e0e0", borderTop: "none",
+                borderRadius: "0 0 8px 8px", padding: 16,
+                display: "flex", flexDirection: "column", gap: 8,
+              }}>
+                {inactiveList.map((item, idx) => {
+                  const label = activeTab === "auditores" ? item.nombre : item;
+                  const usage = getUsageCount(activeTab, label);
+                  return (
+                    <div key={idx} style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "10px 14px", borderRadius: 8, opacity: 0.7,
+                      background: "#f8f8f8", border: "1px dashed #ccc",
+                    }}>
+                      <div>
+                        <span style={{ fontSize: 13, color: "#888" }}>{label}</span>
+                        {activeTab === "auditores" && item.cargo && (
+                          <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>({item.cargo})</span>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        {usage > 0 && <InUseBadge count={usage} />}
+                        <button onClick={() => activeTab === "auditores" ? reactivateAuditor(label) : reactivateSimpleItem(activeTab, item)} style={{
+                          background: "#28a745", border: "none", borderRadius: 6,
+                          color: "#fff", fontSize: 11, fontWeight: 700,
+                          padding: "4px 10px", cursor: "pointer",
+                        }}>✓ Reactivar</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
         <button onClick={handleSave} style={{
@@ -1362,7 +1631,21 @@ function NoConformidadesView({ audits, onBack }) {
 }
 
 // ── Main App ──
-const DEFAULT_CONFIG = { sedes: [], auditores: [], auditados: [], procesos: [] }; // auditores: [{nombre, cargo, firma}]
+const DEFAULT_CONFIG = { sedes: [], auditores: [], auditados: [], procesos: [], inactivos: { sedes: [], auditores: [], auditados: [], procesos: [] } };
+
+// Helpers: JS ↔ DB field mapping
+const auditToDb = (a) => ({
+  id: a.id, tipo: a.tipo, sede: a.sede, fecha: a.fecha,
+  realizada_por: a.realizadaPor, recibida_por: a.recibidaPor,
+  items: a.items, conclusiones: a.conclusiones || {},
+  bloqueado: !!a.bloqueado,
+});
+const auditFromDb = (r) => ({
+  id: r.id, tipo: r.tipo, sede: r.sede, fecha: r.fecha,
+  realizadaPor: r.realizada_por, recibidaPor: r.recibida_por,
+  items: r.items || [], conclusiones: r.conclusiones || {},
+  bloqueado: r.bloqueado,
+});
 
 export default function App() {
   const [audits, setAudits] = useState([]);
@@ -1372,47 +1655,51 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [expandedSedes, setExpandedSedes] = useState({});
 
-  // Carga desde localStorage
+  // Carga desde Supabase
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("auditorias-data");
-      if (saved) setAudits(JSON.parse(saved));
-      const savedConfig = localStorage.getItem("auditorias-config");
-      if (savedConfig) {
-        const parsed = JSON.parse(savedConfig);
-        // Migrar clave receptores → auditados
-        if (parsed.receptores && !parsed.auditados) {
-          parsed.auditados = parsed.receptores;
-          delete parsed.receptores;
+    async function loadData() {
+      try {
+        const { data: rows } = await supabase.from("audits").select("*").order("created_at", { ascending: true });
+        if (rows) setAudits(rows.map(auditFromDb));
+
+        const { data: cfgRows } = await supabase.from("config").select("*").eq("id", 1).single();
+        if (cfgRows) {
+          setConfig({
+            sedes: cfgRows.sedes || [],
+            auditores: cfgRows.auditores || [],
+            auditados: cfgRows.auditados || [],
+            procesos: cfgRows.procesos || [],
+            inactivos: cfgRows.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [] },
+          });
         }
-        setConfig({ ...DEFAULT_CONFIG, ...parsed });
-      }
-    } catch (e) { /* primera vez */ }
-    setLoading(false);
+      } catch (e) { console.error("Error cargando datos:", e); }
+      setLoading(false);
+    }
+    loadData();
   }, []);
 
-  // Guarda auditorías en localStorage
-  const saveAudits = useCallback((newAudits) => {
-    setAudits(newAudits);
-    try {
-      localStorage.setItem("auditorias-data", JSON.stringify(newAudits));
-    } catch (e) { console.error("Error al guardar:", e); }
-  }, []);
-
-  // Guarda config en localStorage
-  const saveConfig = useCallback((newConfig) => {
+  // Guarda config en Supabase
+  const saveConfig = useCallback(async (newConfig) => {
     setConfig(newConfig);
     try {
-      localStorage.setItem("auditorias-config", JSON.stringify(newConfig));
+      await supabase.from("config").update({
+        sedes: newConfig.sedes,
+        auditores: newConfig.auditores,
+        auditados: newConfig.auditados,
+        procesos: newConfig.procesos,
+        inactivos: newConfig.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [] },
+      }).eq("id", 1);
     } catch (e) { console.error("Error al guardar config:", e); }
   }, []);
 
-  const createAudit = (tipo) => {
+  const createAudit = async (tipo) => {
     const newAudit = createNewAudit(tipo);
-    const updated = [...audits, newAudit];
-    saveAudits(updated);
-    setActiveAuditId(newAudit.id);
-    setCurrentView("form");
+    try {
+      await supabase.from("audits").insert(auditToDb(newAudit));
+      setAudits(prev => [...prev, newAudit]);
+      setActiveAuditId(newAudit.id);
+      setCurrentView("form");
+    } catch (e) { console.error("Error creando auditoría:", e); }
   };
 
   const openAudit = (id) => {
@@ -1420,9 +1707,16 @@ export default function App() {
     setCurrentView("form");
   };
 
+  const updateTimerRef = useRef(null);
   const updateAudit = (updatedAudit) => {
-    const updated = audits.map(a => a.id === updatedAudit.id ? updatedAudit : a);
-    saveAudits(updated);
+    setAudits(prev => prev.map(a => a.id === updatedAudit.id ? updatedAudit : a));
+    // Debounce Supabase write (800ms after last keystroke)
+    if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+    updateTimerRef.current = setTimeout(async () => {
+      try {
+        await supabase.from("audits").update(auditToDb(updatedAudit)).eq("id", updatedAudit.id);
+      } catch (e) { console.error("Error actualizando auditoría:", e); }
+    }, 800);
   };
 
   const [adminModal, setAdminModal] = useState(null); // { action, payload }
@@ -1433,27 +1727,38 @@ export default function App() {
       setAdminModal({ action: "delete", payload: id, mensaje: "Esta auditoría está guardada. Se requiere contraseña para eliminarla." });
     } else {
       if (confirm("¿Está seguro de eliminar esta auditoría?")) {
-        saveAudits(audits.filter(a => a.id !== id));
+        doDelete(id);
       }
     }
   };
 
-  const lockAudit = (id) => {
+  const doDelete = async (id) => {
+    setAudits(prev => prev.filter(a => a.id !== id));
+    try {
+      await supabase.from("audits").delete().eq("id", id);
+    } catch (e) { console.error("Error eliminando:", e); }
+  };
+
+  const lockAudit = async (id) => {
     if (confirm("¿Guardar el informe? Ya no podrá modificarse sin contraseña de administrador.")) {
-      const updated = audits.map(a => a.id === id ? { ...a, bloqueado: true } : a);
-      saveAudits(updated);
+      setAudits(prev => prev.map(a => a.id === id ? { ...a, bloqueado: true } : a));
+      try {
+        await supabase.from("audits").update({ bloqueado: true }).eq("id", id);
+      } catch (e) { console.error("Error guardando:", e); }
     }
   };
 
-  const unlockAudit = (id) => {
-    const updated = audits.map(a => a.id === id ? { ...a, bloqueado: false } : a);
-    saveAudits(updated);
+  const unlockAudit = async (id) => {
+    setAudits(prev => prev.map(a => a.id === id ? { ...a, bloqueado: false } : a));
+    try {
+      await supabase.from("audits").update({ bloqueado: false }).eq("id", id);
+    } catch (e) { console.error("Error desbloqueando:", e); }
   };
 
   const handleAdminConfirm = () => {
     if (!adminModal) return;
     if (adminModal.action === "delete") {
-      saveAudits(audits.filter(a => a.id !== adminModal.payload));
+      doDelete(adminModal.payload);
     } else if (adminModal.action === "unlock") {
       unlockAudit(adminModal.payload);
       setCurrentView("form");
@@ -1717,6 +2022,7 @@ export default function App() {
       {currentView === "config" && (
         <ConfigView
           config={config}
+          audits={audits}
           onSave={saveConfig}
           onBack={() => setCurrentView("home")}
         />
