@@ -1091,29 +1091,58 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
     const errors = [];
 
     // 1. Header fields
-    if (!audit.sede || !audit.sede.trim()) errors.push("Falta seleccionar la sede.");
-    if (!audit.fecha) errors.push("Falta la fecha de la auditoría.");
-    if (!audit.realizadaPor || !audit.realizadaPor.trim()) errors.push("Falta seleccionar quién realiza la auditoría.");
-    if (!audit.recibidaPor || !audit.recibidaPor.trim()) errors.push("Falta seleccionar el auditado.");
+    if (!audit.sede || !audit.sede.trim()) errors.push("⬚ Falta seleccionar la sede.");
+    if (!audit.fecha) errors.push("⬚ Falta la fecha de la auditoría.");
+    if (!audit.realizadaPor || !audit.realizadaPor.trim()) errors.push("⬚ Falta seleccionar quién realiza la auditoría.");
+    if (!audit.recibidaPor || !audit.recibidaPor.trim()) errors.push("⬚ Falta seleccionar el auditado.");
 
     // 2. All criteria must have calificación
     const sinCalificar = audit.items.filter(i => !i.estado);
-    if (sinCalificar.length > 0) errors.push(`Hay ${sinCalificar.length} criterio(s) sin calificar.`);
+    if (sinCalificar.length > 0) {
+      errors.push(`⬚ Hay ${sinCalificar.length} criterio(s) sin calificar:`);
+      sinCalificar.forEach(i => {
+        const short = i.criterio.length > 60 ? i.criterio.substring(0, 60) + "…" : i.criterio;
+        errors.push(`    → Criterio #${i.num} (${i.componente}): "${short}"`);
+      });
+    }
 
     // 3. Observación → must have hallazgo
     const obsVacias = audit.items.filter(i => i.estado === "Observación" && (!i.descripcion || !i.descripcion.trim()));
-    if (obsVacias.length > 0) errors.push(`Hay ${obsVacias.length} observación(es) sin hallazgo escrito.`);
+    if (obsVacias.length > 0) {
+      errors.push(`⬚ Hay ${obsVacias.length} observación(es) sin hallazgo escrito:`);
+      obsVacias.forEach(i => {
+        const short = i.criterio.length > 60 ? i.criterio.substring(0, 60) + "…" : i.criterio;
+        errors.push(`    → Criterio #${i.num} (${i.componente}): "${short}" — falta hallazgo`);
+      });
+    }
 
     // 4. No conforme → must have procesoResponsable AND hallazgo
     const ncSinProceso = audit.items.filter(i => i.estado === "No conforme" && (!i.procesoResponsable || !i.procesoResponsable.trim()));
     const ncSinHallazgo = audit.items.filter(i => i.estado === "No conforme" && (!i.descripcion || !i.descripcion.trim()));
-    if (ncSinProceso.length > 0) errors.push(`Hay ${ncSinProceso.length} no conformidad(es) sin proceso responsable.`);
-    if (ncSinHallazgo.length > 0) errors.push(`Hay ${ncSinHallazgo.length} no conformidad(es) sin hallazgo escrito.`);
+    if (ncSinProceso.length > 0) {
+      errors.push(`⬚ Hay ${ncSinProceso.length} no conformidad(es) sin proceso responsable:`);
+      ncSinProceso.forEach(i => {
+        const short = i.criterio.length > 60 ? i.criterio.substring(0, 60) + "…" : i.criterio;
+        errors.push(`    → Criterio #${i.num} (${i.componente}): "${short}" — falta proceso responsable`);
+      });
+    }
+    if (ncSinHallazgo.length > 0) {
+      errors.push(`⬚ Hay ${ncSinHallazgo.length} no conformidad(es) sin hallazgo escrito:`);
+      ncSinHallazgo.forEach(i => {
+        const short = i.criterio.length > 60 ? i.criterio.substring(0, 60) + "…" : i.criterio;
+        errors.push(`    → Criterio #${i.num} (${i.componente}): "${short}" — falta hallazgo`);
+      });
+    }
 
     // 5. All component conclusions must be filled
     const componentes = [...new Set(audit.items.map(i => i.componente))];
     const sinConclusion = componentes.filter(c => !(audit.conclusiones || {})[c] || !(audit.conclusiones || {})[c].trim());
-    if (sinConclusion.length > 0) errors.push(`Faltan conclusiones en ${sinConclusion.length} componente(s): ${sinConclusion.map(c => c.length > 30 ? c.substring(0, 30) + "…" : c).join(", ")}.`);
+    if (sinConclusion.length > 0) {
+      errors.push(`⬚ Faltan conclusiones en ${sinConclusion.length} componente(s):`);
+      sinConclusion.forEach(c => {
+        errors.push(`    → ${c}`);
+      });
+    }
 
     if (errors.length > 0) {
       setValidationErrors(errors);
@@ -1226,6 +1255,7 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
         <div style={{
           background: "#fef2f2", border: "1px solid #fecaca", borderLeft: "4px solid #dc3545",
           borderRadius: 8, padding: "14px 18px", marginBottom: 16,
+          maxHeight: 320, overflowY: "auto",
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#991b1b" }}>
@@ -1236,11 +1266,22 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
               fontSize: 18, fontWeight: 700, padding: "0 4px",
             }}>×</button>
           </div>
-          {validationErrors.map((err, i) => (
-            <div key={i} style={{ fontSize: 13, color: "#b91c1c", padding: "3px 0", lineHeight: 1.4 }}>
-              • {err}
-            </div>
-          ))}
+          {validationErrors.map((err, i) => {
+            const isDetail = err.startsWith("    →");
+            return (
+              <div key={i} style={{
+                fontSize: isDetail ? 12 : 13,
+                color: isDetail ? "#7f1d1d" : "#b91c1c",
+                padding: isDetail ? "2px 0 2px 16px" : "5px 0 2px 0",
+                lineHeight: 1.4,
+                fontWeight: isDetail ? 400 : 600,
+                borderTop: !isDetail && i > 0 ? "1px solid #fecaca" : "none",
+                marginTop: !isDetail && i > 0 ? 6 : 0,
+              }}>
+                {isDetail ? err.trim() : err}
+              </div>
+            );
+          })}
         </div>
       )}
 
