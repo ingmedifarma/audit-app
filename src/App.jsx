@@ -262,7 +262,7 @@ async function generateWord(audit, config = {}) {
   if (noConformeItems.length > 0) {
     doc.autoTable({
       startY: y,
-      margin: { left: MARGIN, right: MARGIN },
+      margin: { left: MARGIN, right: MARGIN, top: HEADER_H + 6 },
       head: [["N°", "Criterio de auditoría", "Hallazgo", "Proceso responsable"]],
       body: noConformeItems.map(f => [f.num, f.criterio, f.descripcion || "—", f.procesoResponsable || "—"]),
       styles: { fontSize: 8.5, cellPadding: 3, font: "helvetica", textColor: [50,50,50], overflow: "linebreak" },
