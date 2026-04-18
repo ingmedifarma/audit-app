@@ -1078,6 +1078,10 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
   const updateItem = (idx, field, value) => {
     const newItems = [...audit.items];
     newItems[idx] = { ...newItems[idx], [field]: value };
+    // Si cambia el estado a algo diferente de "No conforme", borrar proceso responsable
+    if (field === "estado" && value !== "No conforme") {
+      newItems[idx].procesoResponsable = "";
+    }
     onUpdate({ ...audit, items: newItems });
   };
 
