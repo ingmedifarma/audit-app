@@ -33,6 +33,7 @@ const GESTION_CRITERIA = [
   { componente: "SISTEMA DE GARANTÍA DE CALIDAD DE PUNTOS DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Cuentan con registros de limpieza y desinfección de áreas?", aclaracion: "NO APLICA" },
   { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Llevan registros de recepción técnica y administrativa de los medicamentos y dispositivos médicos en el punto de dispensación?", aclaracion: "NO APLICA" },
   { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Llevan registros de control de temperatura y humedad relativa ambiente?", aclaracion: "NO APLICA" },
+  { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "Se evidencia semaforización LASA según lo establece el procedimiento.", aclaracion: "Se asignan colores específicos para identificar visualmente cada tipo de riesgo asociado:\n- Presentaciones similares (Naranja)\n- Igual principio activo con diferente concentración (Verde claro)\n- Medicamentos fonéticamente similares (Azul)\n- Alto riesgo (Morado)" },
   { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Llevan registros de control de la cadena de frío para medicamentos que así lo requieran?", aclaracion: "NO APLICA" },
   { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Llevan registros de la devolución de medicamentos/dispositivos médicos que deban ser sometidos a procesos de destrucción o desnaturalización?", aclaracion: "NO APLICA" },
   { componente: "EVIDENCIAS DE LA GESTIÓN DEL ESTABLECIMIENTO FARMACÉUTICO", criterio: "¿Se cuentan con equipos de medición de temperatura y/o humedad con calibración vigente?", aclaracion: "NO APLICA" },
@@ -1879,7 +1880,7 @@ export default function App() {
             >
               <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#1a3a5c", marginBottom: 4 }}>Nueva Auditoría de Gestión</div>
-              <div style={{ fontSize: 12, color: "#888" }}>61 criterios · 7 componentes</div>
+              <div style={{ fontSize: 12, color: "#888" }}>62 criterios · 7 componentes</div>
             </button>
 
             <button onClick={() => setCurrentView("nc")} style={{
