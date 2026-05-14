@@ -446,8 +446,8 @@ function getCalificacion(items) {
   const evaluados = conformes + noConformes + observaciones;
   if (evaluados === 0) return { label: "—", color: "#999", pct: 0 };
   const pct = ((conformes + observaciones) / evaluados) * 100;
-  if (pct > 94.9) return { label: "Sobresaliente", color: "#1a5276", pct };
-  if (pct >= 81) return { label: "Muy bueno", color: "#28a745", pct };
+  if (pct > 94.9) return { label: "Sobresaliente", color: "#28a745", pct };
+  if (pct >= 81) return { label: "Muy bueno", color: "#1a5276", pct };
   if (pct >= 70) return { label: "Bueno", color: "#ffc107", pct };
   if (pct >= 50) return { label: "Mal", color: "#e67e22", pct };
   return { label: "Muy mal", color: "#dc3545", pct };
