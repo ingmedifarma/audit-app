@@ -426,6 +426,7 @@ function SummaryStats({ items }) {
           <span style={{ fontSize: 12, color: "#555", fontWeight: 500 }}>{s.label}</span>
         </div>
       ))}
+      <CalificacionBadge items={items} />
       <div style={{
         marginLeft: "auto", padding: "6px 16px", borderRadius: 8,
         background: "linear-gradient(135deg, #1a5276, #2980b9)",
@@ -437,6 +438,40 @@ function SummaryStats({ items }) {
   );
 }
 
+// ── Calificación cualitativa ──
+function getCalificacion(items) {
+  const conformes = items.filter(i => i.estado === "Conforme").length;
+  const noConformes = items.filter(i => i.estado === "No conforme").length;
+  const observaciones = items.filter(i => i.estado === "Observación").length;
+  const evaluados = conformes + noConformes + observaciones;
+  if (evaluados === 0) return { label: "—", color: "#999", pct: 0 };
+  const pct = ((conformes + observaciones) / evaluados) * 100;
+  if (pct > 94.9) return { label: "Sobresaliente", color: "#1a5276", pct };
+  if (pct >= 81) return { label: "Muy bueno", color: "#28a745", pct };
+  if (pct >= 70) return { label: "Bueno", color: "#ffc107", pct };
+  if (pct >= 50) return { label: "Mal", color: "#e67e22", pct };
+  return { label: "Muy mal", color: "#dc3545", pct };
+}
+
+function CalificacionBadge({ items, size = "normal" }) {
+  const cal = getCalificacion(items);
+  const fs = size === "small" ? 10 : 13;
+  const pad = size === "small" ? "3px 8px" : "6px 14px";
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      padding: pad, borderRadius: 8, fontWeight: 700, fontSize: fs,
+      color: "#fff", backgroundColor: cal.color, whiteSpace: "nowrap",
+    }}>
+      {cal.label} ({cal.pct.toFixed(1)}%)
+    </span>
+  );
+}
+
+// Helper to get sede name from config (objects or strings)
+function getSedeNombre(sede) {
+  return typeof sede === "object" && sede !== null ? sede.nombre : sede;
+}
 
 // ── AdminModal ──
 function AdminModal({ onConfirm, onCancel, mensaje }) {
@@ -555,22 +590,34 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
 
 // ── ConfigView ──
 function ConfigView({ config, audits = [], onSave, onBack }) {
-  const [sedes, setSedes] = useState([...config.sedes]);
+  const [sedes, setSedes] = useState([...(config.sedes || []).map(s => typeof s === "string" ? { nombre: s, municipio: "", tipoRed: "" } : s)]);
   const [auditores, setAuditores] = useState([...(config.auditores || []).map(a => typeof a === "string" ? { nombre: a, cargo: "", firma: "" } : a)]);
   const [auditados, setAuditados] = useState([...(config.auditados || [])]);
   const [procesos, setProcesos] = useState([...(config.procesos || [])]);
+  const [departamentos, setDepartamentos] = useState([...(config.departamentos || [])]);
+  const [municipios, setMunicipios] = useState([...(config.municipios || [])]);
+  const [tipoRed, setTipoRed] = useState([...(config.tipoRed || [])]);
   const [inactivos, setInactivos] = useState({
     sedes: [...(config.inactivos?.sedes || [])],
     auditores: [...(config.inactivos?.auditores || [])],
     auditados: [...(config.inactivos?.auditados || [])],
     procesos: [...(config.inactivos?.procesos || [])],
+    departamentos: [...(config.inactivos?.departamentos || [])],
+    municipios: [...(config.inactivos?.municipios || [])],
+    tipoRed: [...(config.inactivos?.tipoRed || [])],
   });
-  const [newSede, setNewSede] = useState("");
+
+  // New item states
+  const [newSede, setNewSede] = useState({ nombre: "", municipio: "", tipoRed: "" });
   const [newAuditado, setNewAuditado] = useState("");
   const [newProceso, setNewProceso] = useState("");
   const [newAuditorNombre, setNewAuditorNombre] = useState("");
   const [newAuditorCargo, setNewAuditorCargo] = useState("");
-  const [activeTab, setActiveTab] = useState("sedes");
+  const [newDepartamento, setNewDepartamento] = useState("");
+  const [newMunicipio, setNewMunicipio] = useState({ nombre: "", departamento: "" });
+  const [newTipoRed, setNewTipoRed] = useState("");
+
+  const [activeTab, setActiveTab] = useState("departamentos");
   const [editingItem, setEditingItem] = useState(null);
   const [adminPwModal, setAdminPwModal] = useState(null);
   const [adminPw, setAdminPw] = useState("");
@@ -578,76 +625,70 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
   const [showInactivos, setShowInactivos] = useState(false);
 
   const getUsageCount = (type, value) => {
-    return audits.filter(a => {
-      if (type === "sedes") return a.sede === value;
-      if (type === "auditados") return a.recibidaPor === value;
-      if (type === "procesos") return a.items.some(i => i.procesoResponsable === value);
-      if (type === "auditores") return a.realizadaPor === value;
-      return false;
-    }).length;
+    if (type === "sedes") return audits.filter(a => a.sede === (typeof value === "object" ? value.nombre : value)).length;
+    if (type === "auditados") return audits.filter(a => a.recibidaPor === value).length;
+    if (type === "procesos") return audits.filter(a => a.items.some(i => i.procesoResponsable === value)).length;
+    if (type === "auditores") return audits.filter(a => a.realizadaPor === (typeof value === "object" ? value.nombre : value)).length;
+    if (type === "departamentos") return municipios.filter(m => m.departamento === value).length;
+    if (type === "municipios") {
+      const mName = typeof value === "object" ? value.nombre : value;
+      return sedes.filter(s => s.municipio === mName).length;
+    }
+    if (type === "tipoRed") return sedes.filter(s => s.tipoRed === value).length;
+    return 0;
   };
 
-  const addItem = (list, setList, value, setValue) => {
+  const addSimpleItem = (list, setList, value, setValue) => {
     const trimmed = value.trim();
     if (!trimmed || list.includes(trimmed)) return;
     setList([...list, trimmed]);
     setValue("");
   };
 
-  const removeItem = (list, setList, item) => {
+  const removeSimpleItem = (list, setList, item) => {
     setList(list.filter(i => i !== item));
   };
 
-  // Inactivar: mover de activos a inactivos
-  const inactivateSimpleItem = (type, item) => {
-    if (type === "sedes") setSedes(sedes.filter(s => s !== item));
+  // Inactivar
+  const inactivateItem = (type, item) => {
+    if (type === "departamentos") setDepartamentos(departamentos.filter(d => d !== item));
     else if (type === "auditados") setAuditados(auditados.filter(r => r !== item));
     else if (type === "procesos") setProcesos(procesos.filter(p => p !== item));
-    setInactivos(prev => ({ ...prev, [type]: [...prev[type], item] }));
+    else if (type === "tipoRed") setTipoRed(tipoRed.filter(t => t !== item));
+    else if (type === "sedes") setSedes(sedes.filter(s => s.nombre !== item.nombre));
+    else if (type === "municipios") setMunicipios(municipios.filter(m => m.nombre !== item.nombre));
+    else if (type === "auditores") {
+      setAuditores(auditores.filter(a => a.nombre !== (typeof item === "object" ? item.nombre : item)));
+    }
+    setInactivos(prev => ({ ...prev, [type]: [...(prev[type] || []), item] }));
   };
 
-  const inactivateAuditor = (nombre) => {
-    const auditor = auditores.find(a => a.nombre === nombre);
-    if (!auditor) return;
-    setAuditores(auditores.filter(a => a.nombre !== nombre));
-    setInactivos(prev => ({ ...prev, auditores: [...prev.auditores, auditor] }));
-  };
-
-  // Reactivar: mover de inactivos a activos
-  const reactivateSimpleItem = (type, item) => {
-    setInactivos(prev => ({ ...prev, [type]: prev[type].filter(i => i !== item) }));
-    if (type === "sedes") setSedes(prev => [...prev, item]);
+  // Reactivar
+  const reactivateItem = (type, item) => {
+    setInactivos(prev => ({ ...prev, [type]: (prev[type] || []).filter(i => {
+      if (typeof i === "object" && typeof item === "object") return i.nombre !== item.nombre;
+      return i !== item;
+    })}));
+    if (type === "departamentos") setDepartamentos(prev => [...prev, item]);
     else if (type === "auditados") setAuditados(prev => [...prev, item]);
     else if (type === "procesos") setProcesos(prev => [...prev, item]);
-  };
-
-  const reactivateAuditor = (nombre) => {
-    const auditor = inactivos.auditores.find(a => a.nombre === nombre);
-    if (!auditor) return;
-    setInactivos(prev => ({ ...prev, auditores: prev.auditores.filter(a => a.nombre !== nombre) }));
-    setAuditores(prev => [...prev, auditor]);
+    else if (type === "tipoRed") setTipoRed(prev => [...prev, item]);
+    else if (type === "sedes") setSedes(prev => [...prev, item]);
+    else if (type === "municipios") setMunicipios(prev => [...prev, item]);
+    else if (type === "auditores") setAuditores(prev => [...prev, item]);
   };
 
   const addAuditor = () => {
     const nombre = newAuditorNombre.trim();
-    if (!nombre) return;
-    if (auditores.some(a => a.nombre === nombre)) return;
+    if (!nombre || auditores.some(a => a.nombre === nombre)) return;
     setAuditores([...auditores, { nombre, cargo: newAuditorCargo.trim(), firma: "" }]);
-    setNewAuditorNombre("");
-    setNewAuditorCargo("");
+    setNewAuditorNombre(""); setNewAuditorCargo("");
   };
 
-  const removeAuditor = (nombre) => {
-    setAuditores(auditores.filter(a => a.nombre !== nombre));
-  };
+  const removeAuditor = (nombre) => setAuditores(auditores.filter(a => a.nombre !== nombre));
 
-  const updateAuditorFirma = (nombre, firmaBase64) => {
-    setAuditores(auditores.map(a => a.nombre === nombre ? { ...a, firma: firmaBase64 } : a));
-  };
-
-  const updateAuditorField = (nombre, field, value) => {
-    setAuditores(auditores.map(a => a.nombre === nombre ? { ...a, [field]: value } : a));
-  };
+  const updateAuditorFirma = (nombre, firmaBase64) => setAuditores(auditores.map(a => a.nombre === nombre ? { ...a, firma: firmaBase64 } : a));
+  const updateAuditorField = (nombre, field, value) => setAuditores(auditores.map(a => a.nombre === nombre ? { ...a, [field]: value } : a));
 
   const handleFirmaUpload = (nombre, e) => {
     const file = e.target.files[0];
@@ -657,123 +698,160 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
     reader.readAsDataURL(file);
   };
 
-  // Start editing an in-use item (requires password)
+  const addMunicipio = () => {
+    const nombre = newMunicipio.nombre.trim();
+    if (!nombre || !newMunicipio.departamento || municipios.some(m => m.nombre === nombre)) return;
+    setMunicipios([...municipios, { nombre, departamento: newMunicipio.departamento }]);
+    setNewMunicipio({ nombre: "", departamento: "" });
+  };
+
+  const addSede = () => {
+    const nombre = newSede.nombre.trim();
+    if (!nombre || !newSede.municipio || !newSede.tipoRed || sedes.some(s => s.nombre === nombre)) return;
+    setSedes([...sedes, { nombre, municipio: newSede.municipio, tipoRed: newSede.tipoRed }]);
+    setNewSede({ nombre: "", municipio: "", tipoRed: "" });
+  };
+
   const requestEdit = (type, oldValue) => {
     setAdminPwModal({ action: "edit", type, oldValue });
-    setAdminPw("");
-    setAdminPwError(false);
+    setAdminPw(""); setAdminPwError(false);
   };
 
   const confirmAdminPw = () => {
-    if (adminPw !== "CoordinadorQCI*") {
-      setAdminPwError(true);
-      return;
-    }
+    if (adminPw !== "CoordinadorQCI*") { setAdminPwError(true); return; }
     if (adminPwModal.action === "edit") {
-      setEditingItem({ type: adminPwModal.type, oldValue: adminPwModal.oldValue, newValue: adminPwModal.oldValue });
+      setEditingItem({ type: adminPwModal.type, oldValue: adminPwModal.oldValue, newValue: typeof adminPwModal.oldValue === "object" ? adminPwModal.oldValue.nombre : adminPwModal.oldValue });
     } else if (adminPwModal.action === "delete") {
       const { type, value } = adminPwModal;
-      if (type === "auditores") removeAuditor(value);
-      else {
-        const tab = simpleTabs.find(t => t.key === type);
-        if (tab) removeItem(tab.list, tab.setList, value);
-      }
+      if (type === "auditores") removeAuditor(typeof value === "object" ? value.nombre : value);
+      else if (type === "sedes") setSedes(sedes.filter(s => s.nombre !== (typeof value === "object" ? value.nombre : value)));
+      else if (type === "municipios") setMunicipios(municipios.filter(m => m.nombre !== (typeof value === "object" ? value.nombre : value)));
+      else { removeSimpleItem(
+        type === "departamentos" ? departamentos : type === "auditados" ? auditados : type === "tipoRed" ? tipoRed : procesos,
+        type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos,
+        value
+      ); }
     }
-    setAdminPwModal(null);
-    setAdminPw("");
+    setAdminPwModal(null); setAdminPw("");
   };
 
   const saveEditedItem = () => {
     if (!editingItem || !editingItem.newValue.trim()) return;
     const { type, oldValue, newValue } = editingItem;
-    if (type === "auditores") {
-      setAuditores(auditores.map(a => a.nombre === oldValue ? { ...a, nombre: newValue.trim() } : a));
-    } else if (type === "sedes") {
-      setSedes(sedes.map(s => s === oldValue ? newValue.trim() : s));
-    } else if (type === "auditados") {
-      setAuditados(auditados.map(r => r === oldValue ? newValue.trim() : r));
-    } else if (type === "procesos") {
-      setProcesos(procesos.map(p => p === oldValue ? newValue.trim() : p));
-    }
+    const nv = newValue.trim();
+    if (type === "auditores") setAuditores(auditores.map(a => a.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...a, nombre: nv } : a));
+    else if (type === "sedes") setSedes(sedes.map(s => s.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...s, nombre: nv } : s));
+    else if (type === "municipios") setMunicipios(municipios.map(m => m.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...m, nombre: nv } : m));
+    else if (type === "departamentos") setDepartamentos(departamentos.map(d => d === oldValue ? nv : d));
+    else if (type === "tipoRed") setTipoRed(tipoRed.map(t => t === oldValue ? nv : t));
+    else if (type === "auditados") setAuditados(auditados.map(r => r === oldValue ? nv : r));
+    else if (type === "procesos") setProcesos(procesos.map(p => p === oldValue ? nv : p));
     setEditingItem(null);
   };
 
   const handleSave = () => {
-    onSave({ sedes, auditores, auditados, procesos, inactivos });
+    onSave({ sedes, auditores, auditados, procesos, departamentos, municipios, tipoRed, inactivos });
     onBack();
   };
 
-  const simpleTabs = [
-    { key: "sedes", label: "🏥 Sedes", list: sedes, setList: setSedes, newVal: newSede, setNewVal: setNewSede, placeholder: "Nombre de la sede..." },
-    { key: "auditados", label: "👥 Auditados", list: auditados, setList: setAuditados, newVal: newAuditado, setNewVal: setNewAuditado, placeholder: "Nombre del auditado..." },
-    { key: "procesos", label: "🔧 Proceso Responsable", list: procesos, setList: setProcesos, newVal: newProceso, setNewVal: setNewProceso, placeholder: "Nombre del proceso responsable..." },
+  const allTabs = [
+    { key: "departamentos", label: "🗺️ Departamentos", count: departamentos.length },
+    { key: "municipios", label: "🏘️ Municipios", count: municipios.length },
+    { key: "tipoRed", label: "🔗 Tipo de Red", count: tipoRed.length },
+    { key: "sedes", label: "🏥 Sedes", count: sedes.length },
+    { key: "auditores", label: "👤 Auditores", count: auditores.length },
+    { key: "auditados", label: "👥 Auditados", count: auditados.length },
+    { key: "procesos", label: "🔧 Procesos", count: procesos.length },
   ];
 
-  const current = simpleTabs.find(t => t.key === activeTab);
-
-  // Reusable "in-use" badge
   const InUseBadge = ({ count }) => (
-    <span title={`En uso en ${count} auditoría(s)`} style={{
+    <span title={`En uso en ${count} registro(s)`} style={{
       fontSize: 10, fontWeight: 600, color: "#1a5276", backgroundColor: "#dbeafe",
       padding: "2px 8px", borderRadius: 10, whiteSpace: "nowrap",
-    }}>🔗 {count} registro(s)</span>
+    }}>🔗 {count}</span>
+  );
+
+  const ItemActions = ({ type, item, usage }) => {
+    const inUse = usage > 0;
+    const itemKey = typeof item === "object" ? item.nombre : item;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {inUse && <InUseBadge count={usage} />}
+        {inUse && <button onClick={() => requestEdit(type, item)} title="Editar" style={{ background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer", color: "#2980b9", fontSize: 13, padding: "2px 8px" }}>✏️</button>}
+        {!inUse ? (
+          <button onClick={() => {
+            if (type === "sedes") setSedes(sedes.filter(s => s.nombre !== itemKey));
+            else if (type === "municipios") setMunicipios(municipios.filter(m => m.nombre !== itemKey));
+            else if (type === "auditores") removeAuditor(itemKey);
+            else removeSimpleItem(
+              type === "departamentos" ? departamentos : type === "auditados" ? auditados : type === "tipoRed" ? tipoRed : procesos,
+              type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos,
+              item
+            );
+          }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 18, padding: "2px 6px" }}
+            onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
+            onMouseOut={e => e.currentTarget.style.color = "#ccc"}
+          >×</button>
+        ) : (
+          <button onClick={() => inactivateItem(type, item)} title="Inactivar" style={{
+            background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer",
+            color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px",
+          }}>🚫</button>
+        )}
+      </div>
+    );
+  };
+
+  // Render simple string tab content
+  const renderSimpleTab = (type, list, newVal, setNewVal, placeholder) => (
+    <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
+        <input value={newVal} onChange={e => setNewVal(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") { addSimpleItem(list, type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos, newVal, setNewVal); } }}
+          placeholder={placeholder}
+          style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+        <button onClick={() => addSimpleItem(list, type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos, newVal, setNewVal)} style={{
+          padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer",
+        }}>+ Agregar</button>
+      </div>
+      {list.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay elementos.</div></div> : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {list.map(item => {
+            const usage = getUsageCount(type, item);
+            return (
+              <div key={item} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                <span style={{ fontSize: 14, color: "#333" }}>{item}</span>
+                <ItemActions type={type} item={item} usage={usage} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 
   return (
     <div>
-      <div style={{
-        background: "linear-gradient(135deg, #0c2340 0%, #1a5276 100%)",
-        borderRadius: 12, padding: 24, color: "#fff", marginBottom: 20,
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-      }}>
+      <div style={{ background: "linear-gradient(135deg, #0c2340 0%, #1a5276 100%)", borderRadius: 12, padding: 24, color: "#fff", marginBottom: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
           <div style={{ fontSize: 11, letterSpacing: 2, opacity: 0.7, marginBottom: 4 }}>CONFIGURACIÓN</div>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Gestión de Parámetros</h2>
         </div>
-        <button onClick={onBack} style={{
-          background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)",
-          color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13,
-        }}>← Volver</button>
+        <button onClick={onBack} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13 }}>← Volver</button>
       </div>
 
       {/* Admin password modal */}
       {adminPwModal && (
-        <div style={{
-          position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-          backgroundColor: "rgba(0,0,0,0.5)", display: "flex",
-          alignItems: "center", justifyContent: "center", zIndex: 9999,
-        }}>
-          <div style={{
-            background: "#fff", borderRadius: 12, padding: 32, width: 360,
-            boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-          }}>
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 32, width: 360, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <h3 style={{ margin: "0 0 8px 0", fontSize: 16, color: "#1a3a5c" }}>🔒 Contraseña de administrador</h3>
-            <p style={{ fontSize: 13, color: "#666", margin: "0 0 16px 0" }}>
-              Este elemento está en uso en registros de auditoría. Ingrese la contraseña para {adminPwModal.action === "edit" ? "editarlo" : "eliminarlo"}.
-            </p>
-            <input
-              type="password"
-              value={adminPw}
-              onChange={e => { setAdminPw(e.target.value); setAdminPwError(false); }}
-              onKeyDown={e => e.key === "Enter" && confirmAdminPw()}
-              placeholder="Contraseña..."
-              autoFocus
-              style={{
-                width: "100%", padding: "10px 14px", borderRadius: 8,
-                border: `1px solid ${adminPwError ? "#dc3545" : "#ddd"}`,
-                fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 6,
-              }}
-            />
+            <p style={{ fontSize: 13, color: "#666", margin: "0 0 16px 0" }}>Ingrese la contraseña para {adminPwModal.action === "edit" ? "editarlo" : "eliminarlo"}.</p>
+            <input type="password" value={adminPw} onChange={e => { setAdminPw(e.target.value); setAdminPwError(false); }} onKeyDown={e => e.key === "Enter" && confirmAdminPw()} placeholder="Contraseña..." autoFocus
+              style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: `1px solid ${adminPwError ? "#dc3545" : "#ddd"}`, fontSize: 14, outline: "none", boxSizing: "border-box", marginBottom: 6 }} />
             {adminPwError && <div style={{ fontSize: 12, color: "#dc3545", marginBottom: 8 }}>Contraseña incorrecta</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
-              <button onClick={() => setAdminPwModal(null)} style={{
-                padding: "8px 20px", borderRadius: 8, border: "1px solid #ddd",
-                background: "#fff", color: "#666", fontSize: 13, cursor: "pointer",
-              }}>Cancelar</button>
-              <button onClick={confirmAdminPw} style={{
-                padding: "8px 20px", borderRadius: 8, border: "none",
-                background: "#1a5276", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer",
-              }}>Confirmar</button>
+              <button onClick={() => setAdminPwModal(null)} style={{ padding: "8px 20px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", color: "#666", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+              <button onClick={confirmAdminPw} style={{ padding: "8px 20px", borderRadius: 8, border: "none", background: "#1a5276", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Confirmar</button>
             </div>
           </div>
         </div>
@@ -781,145 +859,63 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
       {/* Inline edit modal */}
       {editingItem && (
-        <div style={{
-          background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10,
-          padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10,
-        }}>
+        <div style={{ background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#1a5276", whiteSpace: "nowrap" }}>Editando:</span>
-          <input
-            value={editingItem.newValue}
-            onChange={e => setEditingItem({ ...editingItem, newValue: e.target.value })}
-            onKeyDown={e => e.key === "Enter" && saveEditedItem()}
-            autoFocus
-            style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 14, outline: "none" }}
-          />
-          <button onClick={saveEditedItem} style={{
-            padding: "8px 16px", borderRadius: 6, background: "#28a745", color: "#fff",
-            border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer",
-          }}>✓ Guardar</button>
-          <button onClick={() => setEditingItem(null)} style={{
-            padding: "8px 16px", borderRadius: 6, background: "#fff", color: "#666",
-            border: "1px solid #ddd", fontSize: 13, cursor: "pointer",
-          }}>Cancelar</button>
+          <input value={editingItem.newValue} onChange={e => setEditingItem({ ...editingItem, newValue: e.target.value })} onKeyDown={e => e.key === "Enter" && saveEditedItem()} autoFocus
+            style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 14, outline: "none" }} />
+          <button onClick={saveEditedItem} style={{ padding: "8px 16px", borderRadius: 6, background: "#28a745", color: "#fff", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✓ Guardar</button>
+          <button onClick={() => setEditingItem(null)} style={{ padding: "8px 16px", borderRadius: 6, background: "#fff", color: "#666", border: "1px solid #ddd", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
         </div>
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {[...simpleTabs, { key: "auditores", label: "👤 Auditores" }].map(t => (
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
+        {allTabs.map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-            padding: "10px 20px", borderRadius: 8, border: "2px solid",
+            padding: "8px 14px", borderRadius: 8, border: "2px solid",
             borderColor: activeTab === t.key ? "#1a5276" : "#e0e0e0",
             backgroundColor: activeTab === t.key ? "#1a5276" : "#fff",
             color: activeTab === t.key ? "#fff" : "#555",
-            fontWeight: 600, fontSize: 13, cursor: "pointer",
-          }}>{t.label} <span style={{
-            marginLeft: 6, background: activeTab === t.key ? "rgba(255,255,255,0.2)" : "#eee",
-            borderRadius: 10, padding: "1px 7px", fontSize: 11,
-          }}>{t.key === "auditores" ? auditores.length : t.key === "sedes" ? sedes.length : t.key === "auditados" ? auditados.length : procesos.length}</span>
-          </button>
+            fontWeight: 600, fontSize: 12, cursor: "pointer",
+          }}>{t.label} <span style={{ marginLeft: 4, background: activeTab === t.key ? "rgba(255,255,255,0.2)" : "#eee", borderRadius: 10, padding: "1px 6px", fontSize: 10 }}>{t.count}</span></button>
         ))}
       </div>
 
-      {/* Content — Auditores tab (special) */}
-      {activeTab === "auditores" && (
-        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
-          {/* Add auditor form */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 24 }}>
-            <input value={newAuditorNombre} onChange={e => setNewAuditorNombre(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addAuditor()}
-              placeholder="Nombre del auditor..."
-              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
-            <input value={newAuditorCargo} onChange={e => setNewAuditorCargo(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addAuditor()}
-              placeholder="Cargo..."
-              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
-            <button onClick={addAuditor} style={{
-              padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff",
-              border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap",
-            }}>+ Agregar</button>
-          </div>
+      {/* ── Departamentos ── */}
+      {activeTab === "departamentos" && renderSimpleTab("departamentos", departamentos, newDepartamento, setNewDepartamento, "Nombre del departamento...")}
 
-          {auditores.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-              <div style={{ fontSize: 13 }}>No hay auditores. Agrega el primero.</div>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {auditores.map(a => {
-                const usage = getUsageCount("auditores", a.nombre);
-                const inUse = usage > 0;
+      {/* ── Tipo de Red ── */}
+      {activeTab === "tipoRed" && renderSimpleTab("tipoRed", tipoRed, newTipoRed, setNewTipoRed, "Tipo de red (ej: Red propia, Red aliada)...")}
+
+      {/* ── Auditados ── */}
+      {activeTab === "auditados" && renderSimpleTab("auditados", auditados, newAuditado, setNewAuditado, "Nombre del auditado...")}
+
+      {/* ── Procesos ── */}
+      {activeTab === "procesos" && renderSimpleTab("procesos", procesos, newProceso, setNewProceso, "Nombre del proceso responsable...")}
+
+      {/* ── Municipios ── */}
+      {activeTab === "municipios" && (
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 20 }}>
+            <input value={newMunicipio.nombre} onChange={e => setNewMunicipio({ ...newMunicipio, nombre: e.target.value })}
+              onKeyDown={e => e.key === "Enter" && addMunicipio()} placeholder="Nombre del municipio..."
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <select value={newMunicipio.departamento} onChange={e => setNewMunicipio({ ...newMunicipio, departamento: e.target.value })}
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
+              <option value="">Departamento...</option>
+              {departamentos.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <button onClick={addMunicipio} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
+          </div>
+          {municipios.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay municipios.</div></div> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {municipios.map(m => {
+                const usage = getUsageCount("municipios", m);
                 return (
-                <div key={a.nombre} style={{
-                  borderRadius: 10, border: `1px solid ${inUse ? "#b8d4f0" : "#e0e8f0"}`, background: inUse ? "#f0f7ff" : "#f8fbff", padding: 16,
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                    <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>NOMBRE</label>
-                        <input value={a.nombre} onChange={e => !inUse && updateAuditorField(a.nombre, "nombre", e.target.value)}
-                          readOnly={inUse}
-                          style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box", backgroundColor: inUse ? "#eef4fb" : "#fff" }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>CARGO</label>
-                        <input value={a.cargo} onChange={e => updateAuditorField(a.nombre, "cargo", e.target.value)}
-                          placeholder="Cargo del auditor..."
-                          style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 10 }}>
-                      {inUse && <InUseBadge count={usage} />}
-                      {inUse && (
-                        <button onClick={() => requestEdit("auditores", a.nombre)} title="Editar nombre (requiere contraseña)" style={{
-                          background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer",
-                          color: "#2980b9", fontSize: 13, padding: "2px 8px",
-                        }}>✏️</button>
-                      )}
-                      {!inUse ? (
-                        <button onClick={() => removeAuditor(a.nombre)} style={{
-                          background: "none", border: "none", cursor: "pointer",
-                          color: "#ccc", fontSize: 20, padding: "2px 8px",
-                        }}
-                          onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
-                          onMouseOut={e => e.currentTarget.style.color = "#ccc"}
-                        >×</button>
-                      ) : (
-                        <button onClick={() => inactivateAuditor(a.nombre)} title="Inactivar (ocultar de desplegables)" style={{
-                          background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer",
-                          color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px",
-                        }}>🚫</button>
-                      )}
-                    </div>
+                  <div key={m.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                    <div><span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{m.nombre}</span><span style={{ fontSize: 12, color: "#888", marginLeft: 10 }}>({m.departamento})</span></div>
+                    <ItemActions type="municipios" item={m} usage={usage} />
                   </div>
-                  {/* Firma */}
-                  <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 6 }}>FIRMA</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      {a.firma ? (
-                        <>
-                          <img src={a.firma} alt="firma" style={{ height: 48, border: "1px solid #ddd", borderRadius: 4, background: "#fff", padding: 4 }} />
-                          <button onClick={() => updateAuditorFirma(a.nombre, "")} style={{
-                            fontSize: 12, color: "#dc3545", background: "none", border: "1px solid #dc3545",
-                            borderRadius: 6, padding: "4px 10px", cursor: "pointer",
-                          }}>Quitar firma</button>
-                        </>
-                      ) : (
-                        <label style={{
-                          display: "inline-block", padding: "7px 16px", borderRadius: 6,
-                          background: "#e8f0fe", border: "1px dashed #4a90d9",
-                          color: "#1a5276", fontSize: 12, fontWeight: 600, cursor: "pointer",
-                        }}>
-                          📎 Subir firma (PNG)
-                          <input type="file" accept="image/png,image/jpeg"
-                            onChange={e => handleFirmaUpload(a.nombre, e)}
-                            style={{ display: "none" }} />
-                        </label>
-                      )}
-                    </div>
-                  </div>
-                </div>
                 );
               })}
             </div>
@@ -927,64 +923,101 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
         </div>
       )}
 
-      {/* Content — Simple tabs */}
-      {activeTab !== "auditores" && current && (
+      {/* ── Sedes ── */}
+      {activeTab === "sedes" && (
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
-          <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-            <input
-              value={current.newVal}
-              onChange={e => current.setNewVal(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addItem(current.list, current.setList, current.newVal, current.setNewVal)}
-              placeholder={current.placeholder}
-              style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}
-            />
-            <button onClick={() => addItem(current.list, current.setList, current.newVal, current.setNewVal)} style={{
-              padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff",
-              border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer",
-            }}>+ Agregar</button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, marginBottom: 20 }}>
+            <input value={newSede.nombre} onChange={e => setNewSede({ ...newSede, nombre: e.target.value })}
+              onKeyDown={e => e.key === "Enter" && addSede()} placeholder="Nombre de la sede..."
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <select value={newSede.municipio} onChange={e => setNewSede({ ...newSede, municipio: e.target.value })}
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
+              <option value="">Municipio...</option>
+              {municipios.map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
+            </select>
+            <select value={newSede.tipoRed} onChange={e => setNewSede({ ...newSede, tipoRed: e.target.value })}
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
+              <option value="">Tipo de red...</option>
+              {tipoRed.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button onClick={addSede} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
           </div>
-          {current.list.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-              <div style={{ fontSize: 13 }}>No hay elementos. Agrega el primero.</div>
-            </div>
-          ) : (
+          {sedes.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay sedes.</div></div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {current.list.map(item => {
-                const usage = getUsageCount(current.key, item);
+              {sedes.map(s => {
+                const usage = getUsageCount("sedes", s);
+                return (
+                  <div key={s.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                    <div>
+                      <span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{s.nombre}</span>
+                      <span style={{ fontSize: 12, color: "#888", marginLeft: 10 }}>📍 {s.municipio || "—"}</span>
+                      <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>🔗 {s.tipoRed || "—"}</span>
+                    </div>
+                    <ItemActions type="sedes" item={s} usage={usage} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Auditores ── */}
+      {activeTab === "auditores" && (
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 24 }}>
+            <input value={newAuditorNombre} onChange={e => setNewAuditorNombre(e.target.value)} onKeyDown={e => e.key === "Enter" && addAuditor()} placeholder="Nombre del auditor..."
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <input value={newAuditorCargo} onChange={e => setNewAuditorCargo(e.target.value)} onKeyDown={e => e.key === "Enter" && addAuditor()} placeholder="Cargo..."
+              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <button onClick={addAuditor} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
+          </div>
+          {auditores.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay auditores.</div></div> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {auditores.map(a => {
+                const usage = getUsageCount("auditores", a.nombre);
                 const inUse = usage > 0;
                 return (
-                <div key={item} style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "12px 16px", borderRadius: 8,
-                  background: inUse ? "#f0f7ff" : "#f8f9fa",
-                  border: `1px solid ${inUse ? "#b8d4f0" : "#e9ecef"}`,
-                }}>
-                  <span style={{ fontSize: 14, color: "#333" }}>{item}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {inUse && <InUseBadge count={usage} />}
-                    {inUse && (
-                      <button onClick={() => requestEdit(current.key, item)} title="Editar (requiere contraseña)" style={{
-                        background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer",
-                        color: "#2980b9", fontSize: 13, padding: "2px 8px",
-                      }}>✏️</button>
-                    )}
-                    {!inUse ? (
-                      <button onClick={() => removeItem(current.list, current.setList, item)} style={{
-                        background: "none", border: "none", cursor: "pointer",
-                        color: "#ccc", fontSize: 18, padding: "2px 6px", borderRadius: 4,
-                      }}
-                        onMouseOver={e => e.currentTarget.style.color = "#dc3545"}
-                        onMouseOut={e => e.currentTarget.style.color = "#ccc"}
-                      >×</button>
-                    ) : (
-                      <button onClick={() => inactivateSimpleItem(current.key, item)} title="Inactivar (ocultar de desplegables)" style={{
-                        background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer",
-                        color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px",
-                      }}>🚫</button>
-                    )}
+                  <div key={a.nombre} style={{ borderRadius: 10, border: `1px solid ${inUse ? "#b8d4f0" : "#e0e8f0"}`, background: inUse ? "#f0f7ff" : "#f8fbff", padding: 16 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>NOMBRE</label>
+                          <input value={a.nombre} onChange={e => !inUse && updateAuditorField(a.nombre, "nombre", e.target.value)} readOnly={inUse}
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box", backgroundColor: inUse ? "#eef4fb" : "#fff" }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>CARGO</label>
+                          <input value={a.cargo} onChange={e => updateAuditorField(a.nombre, "cargo", e.target.value)} placeholder="Cargo..."
+                            style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d0dce8", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+                        </div>
+                      </div>
+                      <div style={{ marginLeft: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                        {inUse && <InUseBadge count={usage} />}
+                        {inUse && <button onClick={() => requestEdit("auditores", a)} title="Editar" style={{ background: "none", border: "1px solid #2980b9", borderRadius: 6, cursor: "pointer", color: "#2980b9", fontSize: 13, padding: "2px 8px" }}>✏️</button>}
+                        {!inUse ? (
+                          <button onClick={() => removeAuditor(a.nombre)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 20, padding: "2px 8px" }}
+                            onMouseOver={e => e.currentTarget.style.color = "#dc3545"} onMouseOut={e => e.currentTarget.style.color = "#ccc"}>×</button>
+                        ) : (
+                          <button onClick={() => inactivateItem("auditores", a)} title="Inactivar" style={{ background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer", color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px" }}>🚫</button>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c" }}>FIRMA:</label>
+                      {a.firma ? (
+                        <>
+                          <img src={a.firma} alt="firma" style={{ height: 48, border: "1px solid #ddd", borderRadius: 4, background: "#fff", padding: 4 }} />
+                          <button onClick={() => updateAuditorFirma(a.nombre, "")} style={{ fontSize: 12, color: "#dc3545", background: "none", border: "1px solid #dc3545", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>Quitar firma</button>
+                        </>
+                      ) : (
+                        <label style={{ display: "inline-block", padding: "7px 16px", borderRadius: 6, background: "#e8f0fe", border: "1px dashed #4a90d9", color: "#1a5276", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                          📎 Subir firma (PNG)
+                          <input type="file" accept="image/png,image/jpeg" onChange={e => handleFirmaUpload(a.nombre, e)} style={{ display: "none" }} />
+                        </label>
+                      )}
+                    </div>
                   </div>
-                </div>
                 );
               })}
             </div>
@@ -994,8 +1027,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
       {/* Inactive items section */}
       {(() => {
-        const inactiveKey = activeTab;
-        const inactiveList = inactivos[inactiveKey] || [];
+        const inactiveList = inactivos[activeTab] || [];
         if (inactiveList.length === 0) return null;
         return (
           <div style={{ marginTop: 16 }}>
@@ -1005,41 +1037,18 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
               color: showInactivos ? "#fff" : "#666", width: "100%", textAlign: "left",
               display: "flex", alignItems: "center", gap: 8,
             }}>
-              <span style={{
-                fontSize: 11, transition: "transform 0.2s", display: "inline-block",
-                transform: showInactivos ? "rotate(0deg)" : "rotate(-90deg)",
-              }}>▼</span>
+              <span style={{ fontSize: 11, transition: "transform 0.2s", display: "inline-block", transform: showInactivos ? "rotate(0deg)" : "rotate(-90deg)" }}>▼</span>
               🚫 Inactivos ({inactiveList.length})
             </button>
             {showInactivos && (
-              <div style={{
-                background: "#fafafa", border: "1px solid #e0e0e0", borderTop: "none",
-                borderRadius: "0 0 8px 8px", padding: 16,
-                display: "flex", flexDirection: "column", gap: 8,
-              }}>
+              <div style={{ background: "#fafafa", border: "1px solid #e0e0e0", borderTop: "none", borderRadius: "0 0 8px 8px", padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
                 {inactiveList.map((item, idx) => {
-                  const label = activeTab === "auditores" ? item.nombre : item;
-                  const usage = getUsageCount(activeTab, label);
+                  const label = typeof item === "object" ? item.nombre : item;
+                  const sublabel = typeof item === "object" && item.departamento ? ` (${item.departamento})` : typeof item === "object" && item.municipio ? ` 📍${item.municipio} · 🔗${item.tipoRed || "—"}` : "";
                   return (
-                    <div key={idx} style={{
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                      padding: "10px 14px", borderRadius: 8, opacity: 0.7,
-                      background: "#f8f8f8", border: "1px dashed #ccc",
-                    }}>
-                      <div>
-                        <span style={{ fontSize: 13, color: "#888" }}>{label}</span>
-                        {activeTab === "auditores" && item.cargo && (
-                          <span style={{ fontSize: 11, color: "#aaa", marginLeft: 8 }}>({item.cargo})</span>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        {usage > 0 && <InUseBadge count={usage} />}
-                        <button onClick={() => activeTab === "auditores" ? reactivateAuditor(label) : reactivateSimpleItem(activeTab, item)} style={{
-                          background: "#28a745", border: "none", borderRadius: 6,
-                          color: "#fff", fontSize: 11, fontWeight: 700,
-                          padding: "4px 10px", cursor: "pointer",
-                        }}>✓ Reactivar</button>
-                      </div>
+                    <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 8, opacity: 0.7, background: "#f8f8f8", border: "1px dashed #ccc" }}>
+                      <span style={{ fontSize: 13, color: "#888" }}>{label}{sublabel}</span>
+                      <button onClick={() => reactivateItem(activeTab, item)} style={{ background: "#28a745", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, padding: "4px 10px", cursor: "pointer" }}>✓ Reactivar</button>
                     </div>
                   );
                 })}
@@ -1050,17 +1059,14 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
       })()}
 
       <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end" }}>
-        <button onClick={handleSave} style={{
-          padding: "12px 32px", borderRadius: 8, background: "#28a745", color: "#fff",
-          border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer",
-        }}>💾 Guardar cambios</button>
+        <button onClick={handleSave} style={{ padding: "12px 32px", borderRadius: 8, background: "#28a745", color: "#fff", border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>💾 Guardar cambios</button>
       </div>
     </div>
   );
 }
 
 // ── Audit Form (Formulario 1) ──
-function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { sedes: [], auditores: [], auditados: [], procesos: [] } }) {
+function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { sedes: [], auditores: [], auditados: [], procesos: [], departamentos: [], municipios: [], tipoRed: [] } }) {
   const [expandedRows, setExpandedRows] = useState(new Set());
   const [validationErrors, setValidationErrors] = useState(null);
 
@@ -1222,7 +1228,11 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
             <label style={{ fontSize: 11, opacity: 0.7, display: "block", marginBottom: 2 }}>Sede / Establecimiento</label>
             {audit.bloqueado
               ? <div style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)", backgroundColor: "rgba(255,255,255,0.05)", color: "#fff", fontSize: 14, opacity: 0.8 }}>{audit.sede || "—"}</div>
-              : <SearchableSelect value={audit.sede} onChange={v => updateHeader("sede", v)} options={config.sedes.includes(audit.sede) ? config.sedes : audit.sede ? [audit.sede, ...config.sedes] : config.sedes} placeholder="Buscar sede..." />
+              : (() => {
+                const sedeNames = config.sedes.map(s => getSedeNombre(s));
+                const opts = sedeNames.includes(audit.sede) ? sedeNames : audit.sede ? [audit.sede, ...sedeNames] : sedeNames;
+                return <SearchableSelect value={audit.sede} onChange={v => updateHeader("sede", v)} options={opts} placeholder="Buscar sede..." />;
+              })()
             }
           </div>
           <div>
@@ -1677,7 +1687,7 @@ function NoConformidadesView({ audits, onBack }) {
 }
 
 // ── Main App ──
-const DEFAULT_CONFIG = { sedes: [], auditores: [], auditados: [], procesos: [], inactivos: { sedes: [], auditores: [], auditados: [], procesos: [] } };
+const DEFAULT_CONFIG = { sedes: [], auditores: [], auditados: [], procesos: [], departamentos: [], municipios: [], tipoRed: [], inactivos: { sedes: [], auditores: [], auditados: [], procesos: [], departamentos: [], municipios: [], tipoRed: [] } };
 
 // Helpers: JS ↔ DB field mapping
 const auditToDb = (a) => ({
@@ -1710,12 +1720,18 @@ export default function App() {
 
         const { data: cfgRows } = await supabase.from("config").select("*").eq("id", 1).single();
         if (cfgRows) {
+          // Normalizar sedes: convertir strings antiguos a objetos
+          const rawSedes = cfgRows.sedes || [];
+          const normalizedSedes = rawSedes.map(s => typeof s === "string" ? { nombre: s, municipio: "", tipoRed: "" } : s);
           setConfig({
-            sedes: cfgRows.sedes || [],
+            sedes: normalizedSedes,
             auditores: cfgRows.auditores || [],
             auditados: cfgRows.auditados || [],
             procesos: cfgRows.procesos || [],
-            inactivos: cfgRows.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [] },
+            departamentos: cfgRows.departamentos || [],
+            municipios: cfgRows.municipios || [],
+            tipoRed: cfgRows.tipo_red || [],
+            inactivos: cfgRows.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [], departamentos: [], municipios: [], tipoRed: [] },
           });
         }
       } catch (e) { console.error("Error cargando datos:", e); }
@@ -1733,7 +1749,10 @@ export default function App() {
         auditores: newConfig.auditores,
         auditados: newConfig.auditados,
         procesos: newConfig.procesos,
-        inactivos: newConfig.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [] },
+        departamentos: newConfig.departamentos,
+        municipios: newConfig.municipios,
+        tipo_red: newConfig.tipoRed,
+        inactivos: newConfig.inactivos || { sedes: [], auditores: [], auditados: [], procesos: [], departamentos: [], municipios: [], tipoRed: [] },
       }).eq("id", 1);
     } catch (e) { console.error("Error al guardar config:", e); }
   }, []);
@@ -1909,7 +1928,7 @@ export default function App() {
               <div style={{ fontSize: 28, marginBottom: 8 }}>⚙️</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#1e8449", marginBottom: 4 }}>Configuración</div>
               <div style={{ fontSize: 12, color: "#888" }}>
-                {config.sedes.length} sedes · {(config.auditores || []).length} auditores
+                {config.sedes.length} sedes · {(config.auditores || []).length} auditores · {(config.departamentos || []).length} departamentos
               </div>
             </button>
           </div>
@@ -1999,6 +2018,7 @@ export default function App() {
                                 fontSize: 11, fontWeight: 700, color: "#155724",
                                 backgroundColor: "#d4edda", padding: "3px 8px", borderRadius: 6,
                               }}>{conf} ✓</span>}
+                              <CalificacionBadge items={a.items} size="small" />
                             </div>
                             {a.bloqueado && (
                               <>
