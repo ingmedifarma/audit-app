@@ -767,14 +767,19 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
   const addMunicipio = () => {
     const nombre = newMunicipio.nombre.trim();
-    if (!nombre || !newMunicipio.departamento || municipios.some(m => m.nombre.toLowerCase() === nombre.toLowerCase())) return;
-    setMunicipios([...municipios, { nombre, departamento: newMunicipio.departamento }]);
+    const depto = newMunicipio.departamento;
+    if (!nombre || !depto) return;
+    // Permitir mismo nombre si diferente departamento, bloquear solo si ambos coinciden
+    if (municipios.some(m => m.nombre.toLowerCase() === nombre.toLowerCase() && m.departamento.toLowerCase() === depto.toLowerCase())) return;
+    setMunicipios([...municipios, { nombre, departamento: depto }]);
     setNewMunicipio({ nombre: "", departamento: "" });
   };
 
   const addSede = () => {
     const nombre = newSede.nombre.trim();
-    if (!nombre || !newSede.municipio || !newSede.tipoRed || sedes.some(s => s.nombre.toLowerCase() === nombre.toLowerCase())) return;
+    if (!nombre || !newSede.municipio || !newSede.tipoRed) return;
+    // Permitir mismo nombre si diferente municipio o tipo de red, bloquear solo si todo coincide
+    if (sedes.some(s => s.nombre.toLowerCase() === nombre.toLowerCase() && s.municipio.toLowerCase() === newSede.municipio.toLowerCase() && s.tipoRed.toLowerCase() === newSede.tipoRed.toLowerCase())) return;
     setSedes([...sedes, { nombre, municipio: newSede.municipio, tipoRed: newSede.tipoRed }]);
     setNewSede({ nombre: "", municipio: "", tipoRed: "" });
   };
@@ -1074,7 +1079,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
                 const usage = getUsageCount("municipios", m);
                 const incomplete = !m.departamento;
                 return (
-                  <div key={m.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                  <div key={m.nombre + "|" + m.departamento} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
                     <div><span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{m.nombre}</span><span style={{ fontSize: 12, color: m.departamento ? "#888" : "#dc3545", marginLeft: 10 }}>({m.departamento || "⚠ Sin departamento"})</span></div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       {usage > 0 && <InUseBadge count={usage} />}
@@ -1121,7 +1126,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
                 const usage = getUsageCount("sedes", s);
                 const incomplete = !s.municipio || !s.tipoRed;
                 return (
-                  <div key={s.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                  <div key={s.nombre + "|" + s.municipio + "|" + s.tipoRed} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
                     <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{s.nombre}</span>
                       <span style={{ fontSize: 12, color: s.municipio ? "#888" : "#dc3545", marginLeft: 10 }}>📍 {s.municipio || "⚠ Sin municipio"}</span>
