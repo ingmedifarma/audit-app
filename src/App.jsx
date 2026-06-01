@@ -446,8 +446,8 @@ function getCalificacion(items) {
   const evaluados = conformes + noConformes + observaciones;
   if (evaluados === 0) return { label: "—", color: "#999", pct: 0 };
   const pct = ((conformes + observaciones) / evaluados) * 100;
-  if (pct > 94.9) return { label: "Sobresaliente", color: "#28a745", pct };
-  if (pct >= 81) return { label: "Muy bueno", color: "#1a5276", pct };
+  if (pct > 94.9) return { label: "Sobresaliente", color: "#1a5276", pct };
+  if (pct >= 81) return { label: "Muy bueno", color: "#28a745", pct };
   if (pct >= 70) return { label: "Bueno", color: "#ffc107", pct };
   if (pct >= 50) return { label: "Mal", color: "#e67e22", pct };
   return { label: "Muy mal", color: "#dc3545", pct };
@@ -720,7 +720,14 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
   const confirmAdminPw = () => {
     if (adminPw !== "CoordinadorQCI*") { setAdminPwError(true); return; }
     if (adminPwModal.action === "edit") {
-      setEditingItem({ type: adminPwModal.type, oldValue: adminPwModal.oldValue, newValue: typeof adminPwModal.oldValue === "object" ? adminPwModal.oldValue.nombre : adminPwModal.oldValue });
+      const ov = adminPwModal.oldValue;
+      if (adminPwModal.type === "sedes") {
+        setEditingItem({ type: "sedes", oldValue: ov, editedSede: { nombre: ov.nombre, municipio: ov.municipio || "", tipoRed: ov.tipoRed || "" } });
+      } else if (adminPwModal.type === "municipios") {
+        setEditingItem({ type: "municipios", oldValue: ov, editedMunicipio: { nombre: ov.nombre, departamento: ov.departamento || "" } });
+      } else {
+        setEditingItem({ type: adminPwModal.type, oldValue: ov, newValue: typeof ov === "object" ? ov.nombre : ov });
+      }
     } else if (adminPwModal.action === "delete") {
       const { type, value } = adminPwModal;
       if (type === "auditores") removeAuditor(typeof value === "object" ? value.nombre : value);
@@ -736,17 +743,47 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
   };
 
   const saveEditedItem = () => {
-    if (!editingItem || !editingItem.newValue.trim()) return;
-    const { type, oldValue, newValue } = editingItem;
-    const nv = newValue.trim();
-    if (type === "auditores") setAuditores(auditores.map(a => a.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...a, nombre: nv } : a));
-    else if (type === "sedes") setSedes(sedes.map(s => s.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...s, nombre: nv } : s));
-    else if (type === "municipios") setMunicipios(municipios.map(m => m.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...m, nombre: nv } : m));
-    else if (type === "departamentos") setDepartamentos(departamentos.map(d => d === oldValue ? nv : d));
-    else if (type === "tipoRed") setTipoRed(tipoRed.map(t => t === oldValue ? nv : t));
-    else if (type === "auditados") setAuditados(auditados.map(r => r === oldValue ? nv : r));
-    else if (type === "procesos") setProcesos(procesos.map(p => p === oldValue ? nv : p));
+    if (!editingItem) return;
+    const { type, oldValue } = editingItem;
+    if (type === "sedes") {
+      const es = editingItem.editedSede;
+      if (!es || !es.nombre.trim()) return;
+      const oldName = typeof oldValue === "object" ? oldValue.nombre : oldValue;
+      setSedes(sedes.map(s => s.nombre === oldName ? { nombre: es.nombre.trim(), municipio: es.municipio, tipoRed: es.tipoRed } : s));
+    } else if (type === "municipios") {
+      const em = editingItem.editedMunicipio;
+      if (!em || !em.nombre.trim()) return;
+      const oldName = typeof oldValue === "object" ? oldValue.nombre : oldValue;
+      setMunicipios(municipios.map(m => m.nombre === oldName ? { nombre: em.nombre.trim(), departamento: em.departamento } : m));
+    } else {
+      if (!editingItem.newValue || !editingItem.newValue.trim()) return;
+      const nv = editingItem.newValue.trim();
+      if (type === "auditores") setAuditores(auditores.map(a => a.nombre === (typeof oldValue === "object" ? oldValue.nombre : oldValue) ? { ...a, nombre: nv } : a));
+      else if (type === "departamentos") setDepartamentos(departamentos.map(d => d === oldValue ? nv : d));
+      else if (type === "tipoRed") setTipoRed(tipoRed.map(t => t === oldValue ? nv : t));
+      else if (type === "auditados") setAuditados(auditados.map(r => r === oldValue ? nv : r));
+      else if (type === "procesos") setProcesos(procesos.map(p => p === oldValue ? nv : p));
+    }
     setEditingItem(null);
+  };
+
+  // Direct edit for sedes/municipios (no admin password needed if not changing name)
+  const startEditSede = (sede) => {
+    const usage = getUsageCount("sedes", sede);
+    if (usage > 0) {
+      requestEdit("sedes", sede);
+    } else {
+      setEditingItem({ type: "sedes", oldValue: sede, editedSede: { nombre: sede.nombre, municipio: sede.municipio || "", tipoRed: sede.tipoRed || "" } });
+    }
+  };
+
+  const startEditMunicipio = (mun) => {
+    const usage = getUsageCount("municipios", mun);
+    if (usage > 0) {
+      requestEdit("municipios", mun);
+    } else {
+      setEditingItem({ type: "municipios", oldValue: mun, editedMunicipio: { nombre: mun.nombre, departamento: mun.departamento || "" } });
+    }
   };
 
   const handleSave = () => {
@@ -858,7 +895,63 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
       )}
 
       {/* Inline edit modal */}
-      {editingItem && (
+      {editingItem && editingItem.type === "sedes" && editingItem.editedSede && (
+        <div style={{ background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10, padding: "16px 18px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5276", marginBottom: 12 }}>✏️ Editando sede: <span style={{ color: "#333" }}>{typeof editingItem.oldValue === "object" ? editingItem.oldValue.nombre : editingItem.oldValue}</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>NOMBRE</label>
+              <input value={editingItem.editedSede.nombre} onChange={e => setEditingItem({ ...editingItem, editedSede: { ...editingItem.editedSede, nombre: e.target.value } })} autoFocus
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>MUNICIPIO</label>
+              <select value={editingItem.editedSede.municipio} onChange={e => setEditingItem({ ...editingItem, editedSede: { ...editingItem.editedSede, municipio: e.target.value } })}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                <option value="">Sin municipio</option>
+                {municipios.map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>TIPO DE RED</label>
+              <select value={editingItem.editedSede.tipoRed} onChange={e => setEditingItem({ ...editingItem, editedSede: { ...editingItem.editedSede, tipoRed: e.target.value } })}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                <option value="">Sin tipo de red</option>
+                {tipoRed.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setEditingItem(null)} style={{ padding: "8px 16px", borderRadius: 6, background: "#fff", color: "#666", border: "1px solid #ddd", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+            <button onClick={saveEditedItem} style={{ padding: "8px 16px", borderRadius: 6, background: "#28a745", color: "#fff", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✓ Guardar cambios</button>
+          </div>
+        </div>
+      )}
+      {editingItem && editingItem.type === "municipios" && editingItem.editedMunicipio && (
+        <div style={{ background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10, padding: "16px 18px", marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#1a5276", marginBottom: 12 }}>✏️ Editando municipio: <span style={{ color: "#333" }}>{typeof editingItem.oldValue === "object" ? editingItem.oldValue.nombre : editingItem.oldValue}</span></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>NOMBRE</label>
+              <input value={editingItem.editedMunicipio.nombre} onChange={e => setEditingItem({ ...editingItem, editedMunicipio: { ...editingItem.editedMunicipio, nombre: e.target.value } })} autoFocus
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: "#1a3a5c", display: "block", marginBottom: 4 }}>DEPARTAMENTO</label>
+              <select value={editingItem.editedMunicipio.departamento} onChange={e => setEditingItem({ ...editingItem, editedMunicipio: { ...editingItem.editedMunicipio, departamento: e.target.value } })}
+                style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
+                <option value="">Sin departamento</option>
+                {departamentos.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button onClick={() => setEditingItem(null)} style={{ padding: "8px 16px", borderRadius: 6, background: "#fff", color: "#666", border: "1px solid #ddd", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+            <button onClick={saveEditedItem} style={{ padding: "8px 16px", borderRadius: 6, background: "#28a745", color: "#fff", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>✓ Guardar cambios</button>
+          </div>
+        </div>
+      )}
+      {editingItem && editingItem.type !== "sedes" && editingItem.type !== "municipios" && (
         <div style={{ background: "#eaf1fb", border: "1px solid #2980b9", borderRadius: 10, padding: "14px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#1a5276", whiteSpace: "nowrap" }}>Editando:</span>
           <input value={editingItem.newValue} onChange={e => setEditingItem({ ...editingItem, newValue: e.target.value })} onKeyDown={e => e.key === "Enter" && saveEditedItem()} autoFocus
@@ -911,10 +1004,23 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {municipios.map(m => {
                 const usage = getUsageCount("municipios", m);
+                const incomplete = !m.departamento;
                 return (
-                  <div key={m.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
-                    <div><span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{m.nombre}</span><span style={{ fontSize: 12, color: "#888", marginLeft: 10 }}>({m.departamento})</span></div>
-                    <ItemActions type="municipios" item={m} usage={usage} />
+                  <div key={m.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                    <div><span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{m.nombre}</span><span style={{ fontSize: 12, color: m.departamento ? "#888" : "#dc3545", marginLeft: 10 }}>({m.departamento || "⚠ Sin departamento"})</span></div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {usage > 0 && <InUseBadge count={usage} />}
+                      <button onClick={() => startEditMunicipio(m)} title="Editar municipio" style={{
+                        background: incomplete ? "#ffc107" : "none", border: `1px solid ${incomplete ? "#ffc107" : "#2980b9"}`, borderRadius: 6, cursor: "pointer",
+                        color: incomplete ? "#fff" : "#2980b9", fontSize: 13, padding: "3px 10px", fontWeight: incomplete ? 700 : 400,
+                      }}>{incomplete ? "⚠ Completar" : "✏️"}</button>
+                      {!usage ? (
+                        <button onClick={() => setMunicipios(municipios.filter(x => x.nombre !== m.nombre))} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 18, padding: "2px 6px" }}
+                          onMouseOver={e => e.currentTarget.style.color = "#dc3545"} onMouseOut={e => e.currentTarget.style.color = "#ccc"}>×</button>
+                      ) : (
+                        <button onClick={() => inactivateItem("municipios", m)} title="Inactivar" style={{ background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer", color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px" }}>🚫</button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -946,14 +1052,27 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {sedes.map(s => {
                 const usage = getUsageCount("sedes", s);
+                const incomplete = !s.municipio || !s.tipoRed;
                 return (
-                  <div key={s.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
-                    <div>
+                  <div key={s.nombre} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: incomplete ? "#fffbeb" : usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${incomplete ? "#ffc107" : usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
+                    <div style={{ flex: 1 }}>
                       <span style={{ fontSize: 14, color: "#333", fontWeight: 600 }}>{s.nombre}</span>
-                      <span style={{ fontSize: 12, color: "#888", marginLeft: 10 }}>📍 {s.municipio || "—"}</span>
-                      <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>🔗 {s.tipoRed || "—"}</span>
+                      <span style={{ fontSize: 12, color: s.municipio ? "#888" : "#dc3545", marginLeft: 10 }}>📍 {s.municipio || "⚠ Sin municipio"}</span>
+                      <span style={{ fontSize: 12, color: s.tipoRed ? "#888" : "#dc3545", marginLeft: 8 }}>🔗 {s.tipoRed || "⚠ Sin red"}</span>
                     </div>
-                    <ItemActions type="sedes" item={s} usage={usage} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      {usage > 0 && <InUseBadge count={usage} />}
+                      <button onClick={() => startEditSede(s)} title="Editar sede" style={{
+                        background: incomplete ? "#ffc107" : "none", border: `1px solid ${incomplete ? "#ffc107" : "#2980b9"}`, borderRadius: 6, cursor: "pointer",
+                        color: incomplete ? "#fff" : "#2980b9", fontSize: 13, padding: "3px 10px", fontWeight: incomplete ? 700 : 400,
+                      }}>{incomplete ? "⚠ Completar" : "✏️"}</button>
+                      {!usage ? (
+                        <button onClick={() => setSedes(sedes.filter(x => x.nombre !== s.nombre))} style={{ background: "none", border: "none", cursor: "pointer", color: "#ccc", fontSize: 18, padding: "2px 6px" }}
+                          onMouseOver={e => e.currentTarget.style.color = "#dc3545"} onMouseOut={e => e.currentTarget.style.color = "#ccc"}>×</button>
+                      ) : (
+                        <button onClick={() => inactivateItem("sedes", s)} title="Inactivar" style={{ background: "#fffbeb", border: "1px solid #ffc107", borderRadius: 6, cursor: "pointer", color: "#856404", fontSize: 11, fontWeight: 600, padding: "3px 8px" }}>🚫</button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
