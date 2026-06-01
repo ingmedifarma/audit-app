@@ -548,7 +548,7 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const filtered = options.filter(o => o.toLowerCase().includes(query.toLowerCase()));
+  const filtered = [...options].sort((a, b) => a.localeCompare(b, "es")).filter(o => o.toLowerCase().includes(query.toLowerCase()));
 
   return (
     <div ref={ref} style={{ position: "relative", ...style }}>
@@ -582,6 +582,73 @@ function SearchableSelect({ value, onChange, options, placeholder, style }) {
               onMouseOut={e => e.currentTarget.style.backgroundColor = ""}
             >{o}</div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DuplicateWarningInput: shows matches while typing ──
+function DuplicateWarningInput({ value, onChange, onSubmit, existingItems, placeholder, style }) {
+  const [focused, setFocused] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setFocused(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const query = (value || "").trim().toLowerCase();
+  const matches = query.length >= 2
+    ? existingItems.filter(item => {
+        const name = typeof item === "object" ? item.nombre : item;
+        return name.toLowerCase().includes(query);
+      }).slice(0, 6)
+    : [];
+
+  const hasExact = existingItems.some(item => {
+    const name = typeof item === "object" ? item.nombre : item;
+    return name.toLowerCase() === query;
+  });
+
+  return (
+    <div ref={ref} style={{ position: "relative", ...style }}>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onKeyDown={e => { if (e.key === "Enter") onSubmit(); }}
+        placeholder={placeholder}
+        style={{
+          width: "100%", padding: "10px 14px", borderRadius: 8, fontSize: 14, outline: "none",
+          border: hasExact ? "2px solid #dc3545" : "1px solid #ddd", boxSizing: "border-box",
+        }}
+      />
+      {focused && matches.length > 0 && query.length >= 2 && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100,
+          background: "#fff", border: "1px solid #ffc107", borderRadius: "0 0 8px 8px",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", maxHeight: 180, overflowY: "auto",
+        }}>
+          <div style={{ padding: "6px 12px", fontSize: 11, fontWeight: 600, color: "#856404", background: "#fffbeb", borderBottom: "1px solid #ffeaa7" }}>
+            ⚠ Ya existen elementos similares:
+          </div>
+          {matches.map((item, i) => {
+            const name = typeof item === "object" ? item.nombre : item;
+            const sub = typeof item === "object" && item.departamento ? ` (${item.departamento})` : typeof item === "object" && item.municipio ? ` · 📍${item.municipio}` : "";
+            return (
+              <div key={i} style={{
+                padding: "8px 12px", fontSize: 13, color: "#333",
+                borderBottom: i < matches.length - 1 ? "1px solid #f5f5f5" : "none",
+                background: name.toLowerCase() === query ? "#fef2f2" : "#fff",
+              }}>
+                <span style={{ fontWeight: name.toLowerCase() === query ? 700 : 400 }}>{name}</span>
+                {sub && <span style={{ fontSize: 11, color: "#888" }}>{sub}</span>}
+                {name.toLowerCase() === query && <span style={{ fontSize: 10, color: "#dc3545", marginLeft: 6, fontWeight: 700 }}>← DUPLICADO</span>}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -640,7 +707,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
   const addSimpleItem = (list, setList, value, setValue) => {
     const trimmed = value.trim();
-    if (!trimmed || list.includes(trimmed)) return;
+    if (!trimmed || list.some(i => i.toLowerCase() === trimmed.toLowerCase())) return;
     setList([...list, trimmed]);
     setValue("");
   };
@@ -680,7 +747,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
   const addAuditor = () => {
     const nombre = newAuditorNombre.trim();
-    if (!nombre || auditores.some(a => a.nombre === nombre)) return;
+    if (!nombre || auditores.some(a => a.nombre.toLowerCase() === nombre.toLowerCase())) return;
     setAuditores([...auditores, { nombre, cargo: newAuditorCargo.trim(), firma: "" }]);
     setNewAuditorNombre(""); setNewAuditorCargo("");
   };
@@ -700,14 +767,14 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
 
   const addMunicipio = () => {
     const nombre = newMunicipio.nombre.trim();
-    if (!nombre || !newMunicipio.departamento || municipios.some(m => m.nombre === nombre)) return;
+    if (!nombre || !newMunicipio.departamento || municipios.some(m => m.nombre.toLowerCase() === nombre.toLowerCase())) return;
     setMunicipios([...municipios, { nombre, departamento: newMunicipio.departamento }]);
     setNewMunicipio({ nombre: "", departamento: "" });
   };
 
   const addSede = () => {
     const nombre = newSede.nombre.trim();
-    if (!nombre || !newSede.municipio || !newSede.tipoRed || sedes.some(s => s.nombre === nombre)) return;
+    if (!nombre || !newSede.municipio || !newSede.tipoRed || sedes.some(s => s.nombre.toLowerCase() === nombre.toLowerCase())) return;
     setSedes([...sedes, { nombre, municipio: newSede.municipio, tipoRed: newSede.tipoRed }]);
     setNewSede({ nombre: "", municipio: "", tipoRed: "" });
   };
@@ -840,20 +907,22 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
   };
 
   // Render simple string tab content
+  // Get all config items for duplicate checking
+  const allConfigItems = { departamentos, municipios, tipoRed, sedes, auditores, auditados, procesos };
+
   const renderSimpleTab = (type, list, newVal, setNewVal, placeholder) => (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <input value={newVal} onChange={e => setNewVal(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") { addSimpleItem(list, type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos, newVal, setNewVal); } }}
-          placeholder={placeholder}
-          style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+        <DuplicateWarningInput value={newVal} onChange={setNewVal}
+          onSubmit={() => addSimpleItem(list, type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos, newVal, setNewVal)}
+          existingItems={list} placeholder={placeholder} style={{ flex: 1 }} />
         <button onClick={() => addSimpleItem(list, type === "departamentos" ? setDepartamentos : type === "auditados" ? setAuditados : type === "tipoRed" ? setTipoRed : setProcesos, newVal, setNewVal)} style={{
           padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer",
         }}>+ Agregar</button>
       </div>
       {list.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay elementos.</div></div> : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {list.map(item => {
+          {[...list].sort((a,b) => a.localeCompare(b, "es")).map(item => {
             const usage = getUsageCount(type, item);
             return (
               <div key={item} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderRadius: 8, background: usage > 0 ? "#f0f7ff" : "#f8f9fa", border: `1px solid ${usage > 0 ? "#b8d4f0" : "#e9ecef"}` }}>
@@ -909,7 +978,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
               <select value={editingItem.editedSede.municipio} onChange={e => setEditingItem({ ...editingItem, editedSede: { ...editingItem.editedSede, municipio: e.target.value } })}
                 style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
                 <option value="">Sin municipio</option>
-                {municipios.map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
+                {[...municipios].sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')).map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
               </select>
             </div>
             <div>
@@ -917,7 +986,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
               <select value={editingItem.editedSede.tipoRed} onChange={e => setEditingItem({ ...editingItem, editedSede: { ...editingItem.editedSede, tipoRed: e.target.value } })}
                 style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
                 <option value="">Sin tipo de red</option>
-                {tipoRed.map(t => <option key={t} value={t}>{t}</option>)}
+                {[...tipoRed].sort((a,b) => a.localeCompare(b, 'es')).map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
           </div>
@@ -941,7 +1010,7 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
               <select value={editingItem.editedMunicipio.departamento} onChange={e => setEditingItem({ ...editingItem, editedMunicipio: { ...editingItem.editedMunicipio, departamento: e.target.value } })}
                 style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid #2980b9", fontSize: 13, outline: "none", boxSizing: "border-box" }}>
                 <option value="">Sin departamento</option>
-                {departamentos.map(d => <option key={d} value={d}>{d}</option>)}
+                {[...departamentos].sort((a,b) => a.localeCompare(b, 'es')).map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
           </div>
@@ -990,19 +1059,18 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
       {activeTab === "municipios" && (
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 20 }}>
-            <input value={newMunicipio.nombre} onChange={e => setNewMunicipio({ ...newMunicipio, nombre: e.target.value })}
-              onKeyDown={e => e.key === "Enter" && addMunicipio()} placeholder="Nombre del municipio..."
-              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <DuplicateWarningInput value={newMunicipio.nombre} onChange={v => setNewMunicipio({ ...newMunicipio, nombre: v })}
+              onSubmit={addMunicipio} existingItems={municipios} placeholder="Nombre del municipio..." />
             <select value={newMunicipio.departamento} onChange={e => setNewMunicipio({ ...newMunicipio, departamento: e.target.value })}
               style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
               <option value="">Departamento...</option>
-              {departamentos.map(d => <option key={d} value={d}>{d}</option>)}
+              {[...departamentos].sort((a,b) => a.localeCompare(b, 'es')).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
             <button onClick={addMunicipio} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
           </div>
           {municipios.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay municipios.</div></div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {municipios.map(m => {
+              {[...municipios].sort((a,b) => a.nombre.localeCompare(b.nombre, "es")).map(m => {
                 const usage = getUsageCount("municipios", m);
                 const incomplete = !m.departamento;
                 return (
@@ -1033,24 +1101,23 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
       {activeTab === "sedes" && (
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 10, marginBottom: 20 }}>
-            <input value={newSede.nombre} onChange={e => setNewSede({ ...newSede, nombre: e.target.value })}
-              onKeyDown={e => e.key === "Enter" && addSede()} placeholder="Nombre de la sede..."
-              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <DuplicateWarningInput value={newSede.nombre} onChange={v => setNewSede({ ...newSede, nombre: v })}
+              onSubmit={addSede} existingItems={sedes} placeholder="Nombre de la sede..." />
             <select value={newSede.municipio} onChange={e => setNewSede({ ...newSede, municipio: e.target.value })}
               style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
               <option value="">Municipio...</option>
-              {municipios.map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
+              {[...municipios].sort((a,b) => a.nombre.localeCompare(b.nombre, 'es')).map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)}
             </select>
             <select value={newSede.tipoRed} onChange={e => setNewSede({ ...newSede, tipoRed: e.target.value })}
               style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }}>
               <option value="">Tipo de red...</option>
-              {tipoRed.map(t => <option key={t} value={t}>{t}</option>)}
+              {[...tipoRed].sort((a,b) => a.localeCompare(b, 'es')).map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <button onClick={addSede} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
           </div>
           {sedes.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay sedes.</div></div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {sedes.map(s => {
+              {[...sedes].sort((a,b) => a.nombre.localeCompare(b.nombre, "es")).map(s => {
                 const usage = getUsageCount("sedes", s);
                 const incomplete = !s.municipio || !s.tipoRed;
                 return (
@@ -1085,15 +1152,15 @@ function ConfigView({ config, audits = [], onSave, onBack }) {
       {activeTab === "auditores" && (
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e8edf2", padding: 24 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 10, marginBottom: 24 }}>
-            <input value={newAuditorNombre} onChange={e => setNewAuditorNombre(e.target.value)} onKeyDown={e => e.key === "Enter" && addAuditor()} placeholder="Nombre del auditor..."
-              style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
+            <DuplicateWarningInput value={newAuditorNombre} onChange={setNewAuditorNombre}
+              onSubmit={addAuditor} existingItems={auditores} placeholder="Nombre del auditor..." />
             <input value={newAuditorCargo} onChange={e => setNewAuditorCargo(e.target.value)} onKeyDown={e => e.key === "Enter" && addAuditor()} placeholder="Cargo..."
               style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #ddd", fontSize: 14, outline: "none" }} />
             <button onClick={addAuditor} style={{ padding: "10px 20px", borderRadius: 8, background: "#1a5276", color: "#fff", border: "none", fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>+ Agregar</button>
           </div>
           {auditores.length === 0 ? <div style={{ textAlign: "center", padding: 32, color: "#aaa" }}><div style={{ fontSize: 28, marginBottom: 8 }}>📭</div><div style={{ fontSize: 13 }}>No hay auditores.</div></div> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {auditores.map(a => {
+              {[...auditores].sort((a,b) => a.nombre.localeCompare(b.nombre, "es")).map(a => {
                 const usage = getUsageCount("auditores", a.nombre);
                 const inUse = usage > 0;
                 return (
