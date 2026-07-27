@@ -17,7 +17,7 @@ const GESTION_CRITERIA = [
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuentan con señalización de ruta de residuos, coherentes con código de colores y horas de recolección?", aclaracion: "NO APLICA" },
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuenta con contrato para la recolección de residuos peligrosos?", aclaracion: "NO APLICA" },
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Se evidencia correcta segregación de los residuos en el punto?", aclaracion: "NO APLICA" },
-  { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuentan con Plan de Gestión Integral de Residuos Hospitalarios y Similares (PGIRHS)?", aclaracion: "NO APLICA" },
+  { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuentan con Plan de Gestión Integral de Residuos Hospitalarios y Similares (PGIRASA)?", aclaracion: "NO APLICA" },
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuentan con un procedimiento o documento de control de plagas?", aclaracion: "NO APLICA" },
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "¿Cuentan con certificado de fumigación de al menos el mes anterior o de ser de antes, cuentan con validez de los tiempos de fumigación?", aclaracion: "NO APLICA" },
   { componente: "SISTEMA DE GESTIÓN - DOCUMENTACIÓN Y EVIDENCIAS DE EJECUCIÓN", criterio: "En caso de red aliada, ¿se evidencia autoevaluación del SG-SST correspondiente al período del año inmediatamente anterior?", aclaracion: "NO APLICA" },
@@ -471,6 +471,83 @@ function CalificacionBadge({ items, size = "normal" }) {
 // Helper to get sede name from config (objects or strings)
 function getSedeNombre(sede) {
   return typeof sede === "object" && sede !== null ? sede.nombre : sede;
+}
+
+// ── Resumen por componente ──
+function ComponentBreakdown({ items }) {
+  const componentes = [...new Set(items.map(i => i.componente))];
+  if (componentes.length === 0) return null;
+
+  return (
+    <div style={{
+      background: "#fff", border: "1px solid #e8edf2", borderRadius: 10,
+      padding: 16, marginBottom: 16,
+    }}>
+      <div style={{
+        fontSize: 13, fontWeight: 700, color: "#1a3a5c", marginBottom: 12,
+        borderBottom: "2px solid #eaf1fb", paddingBottom: 8,
+        display: "flex", alignItems: "center", gap: 8,
+      }}>
+        📊 Cumplimiento por Componente
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {componentes.map(comp => {
+          const compItems = items.filter(i => i.componente === comp);
+          const cal = getCalificacion(compItems);
+          const conf = compItems.filter(i => i.estado === "Conforme").length;
+          const nc = compItems.filter(i => i.estado === "No conforme").length;
+          const obs = compItems.filter(i => i.estado === "Observación").length;
+          const na = compItems.filter(i => i.estado === "No aplica").length;
+          const total = compItems.length;
+          const evaluated = conf + nc + obs;
+
+          // Bar widths
+          const wConf = total > 0 ? Math.round((conf / total) * 100) : 0;
+          const wNC = total > 0 ? Math.round((nc / total) * 100) : 0;
+          const wObs = total > 0 ? Math.round((obs / total) * 100) : 0;
+          const wNA = Math.max(0, 100 - wConf - wNC - wObs);
+
+          const shortName = comp.length > 45 ? comp.substring(0, 45) + "…" : comp;
+
+          return (
+            <div key={comp} style={{
+              padding: "12px 14px", borderRadius: 8,
+              background: "#fafbfc", border: "1px solid #e9ecef",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#1a3a5c", flex: 1 }} title={comp}>{shortName}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{
+                    fontSize: 12, fontWeight: 700, color: cal.color,
+                  }}>{cal.pct.toFixed(1)}%</span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: "#fff",
+                    backgroundColor: cal.color, padding: "2px 8px", borderRadius: 6,
+                    whiteSpace: "nowrap",
+                  }}>{cal.label}</span>
+                </div>
+              </div>
+              {/* Stacked bar */}
+              <div style={{ display: "flex", height: 18, borderRadius: 4, overflow: "hidden", border: "1px solid #e0e0e0", marginBottom: 6 }}>
+                {wConf > 0 && <div style={{ width: wConf + "%", background: "#28a745", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff", fontWeight: 700 }}>{wConf >= 12 ? conf : ""}</div>}
+                {wNC > 0 && <div style={{ width: wNC + "%", background: "#dc3545", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff", fontWeight: 700 }}>{wNC >= 12 ? nc : ""}</div>}
+                {wObs > 0 && <div style={{ width: wObs + "%", background: "#ffc107", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#333", fontWeight: 700 }}>{wObs >= 12 ? obs : ""}</div>}
+                {wNA > 0 && <div style={{ width: wNA + "%", background: "#6c757d", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#fff", fontWeight: 700 }}>{wNA >= 12 ? na : ""}</div>}
+              </div>
+              {/* Legend */}
+              <div style={{ display: "flex", gap: 12, fontSize: 10, color: "#777" }}>
+                <span>✓ {conf}</span>
+                <span style={{ color: "#dc3545" }}>✗ {nc}</span>
+                <span style={{ color: "#856404" }}>⚠ {obs}</span>
+                <span style={{ color: "#6c757d" }}>N/A {na}</span>
+                <span style={{ marginLeft: "auto", color: "#aaa" }}>{evaluated}/{total} evaluados</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ── AdminModal ──
@@ -1492,6 +1569,7 @@ function AuditForm({ audit, onUpdate, onBack, onLock, onRequestEdit, config = { 
       )}
 
       <SummaryStats items={audit.items} />
+      <ComponentBreakdown items={audit.items} />
 
       {/* Criteria Groups */}
       {groups.map((group, gi) => (
